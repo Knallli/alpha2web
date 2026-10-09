@@ -90,6 +90,9 @@ func TestCSRF(t *testing.T) {
 
 func TestNoInlineCode(t *testing.T) {
 	for _, n := range tmpl.Templates() {
+		if n.Tree == nil {
+			continue
+		}
 		s := n.Tree.Root.String()
 		if strings.Contains(s, " style=") || strings.Contains(s, " onclick=") || strings.Contains(s, "<script>") {
 			t.Errorf("template %s has inline style/script", n.Name())
@@ -149,7 +152,7 @@ type testPlugin struct{}
 
 func (testPlugin) Name() string { return "tp" }
 func (testPlugin) Fields() []plugin.Field {
-	return []plugin.Field{{Key: "url", Label: "URL"}, {Key: "secret", Label: "Secret", Secret: true}}
+	return []plugin.Field{{Key: "url", Label: "URL"}, {Key: "secret", Label: "Secret", Kind: plugin.FieldSecret}}
 }
 func (testPlugin) Run(context.Context, plugin.Env) error { return nil }
 

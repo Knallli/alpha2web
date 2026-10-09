@@ -1,12 +1,36 @@
 {{template "header" .}}
-<div data-refresh="/fragment/dashboard" data-every="3000">{{template "status" .S}}</div>
+{{if .Msg}}<div class="msg ok">{{.Msg}}</div>{{end}}
+<div data-refresh="/fragment/dashboard" data-every="3000">{{template "status" .D}}</div>
 {{template "footer" .}}
 
-{{define "status"}}<section class="card"><h2>Camera</h2>
-<p class="big">{{if .Connected}}<span class="dot ok"></span>Connected{{else}}<span class="dot wait"></span>Searching…{{end}}</p>
-<dl><dt>Address</dt><dd>{{.Host}}</dd>
-{{if .Model}}<dt>Model</dt><dd>{{.Model}}</dd>{{end}}
-{{if .Serial}}<dt>Serial</dt><dd>{{.Serial}}</dd>{{end}}
-{{if .Connected}}<dt>Connected since</dt><dd>{{.Since.Format "15:04:05"}}</dd>{{end}}</dl>
-{{if .LastError}}<p class="muted bad">{{.LastError}}</p>{{end}}
-{{if not .Connected}}<p class="muted">Turn the camera on (Wi-Fi + PC Remote).</p>{{end}}</section>{{end}}
+{{define "status"}}{{range .Plugins}}{{if .Notice}}<div class="msg bad">{{.Notice}}{{if .NoticeLink}} <a href="{{.NoticeLink}}">Set it up</a>{{end}}</div>{{end}}{{end}}
+{{with .Plugins}}{{range .}}{{with .Transfer}}<section class="card"><h2>Downloading</h2>
+<p title="{{.Name}}">{{.Name}}</p>
+<progress max="100" value="{{.Percent}}"></progress>
+<p class="muted">{{.Percent}} % · {{bytes .Done}}{{if .Size}} of {{bytes .Size}}{{end}}{{if .BytesPerSec}} · {{bytes (int64 .BytesPerSec)}}/s{{end}}{{if .ETA}} · {{.ETA}} left{{end}} · running {{since .Started}}</p></section>{{end}}{{end}}{{end}}
+<div class="grid">
+<section class="card"><h2>Camera</h2>
+<p class="big">{{if .S.Connected}}<span class="dot ok"></span>Connected{{else}}<span class="dot wait"></span>Searching…{{end}}</p>
+<dl><dt>Address</dt><dd>{{.S.Host}}</dd>
+{{if .S.Model}}<dt>Model</dt><dd>{{.S.Model}}</dd>{{end}}
+{{if .S.Serial}}<dt>Serial</dt><dd>{{.S.Serial}}</dd>{{end}}
+{{if .S.Connected}}<dt>Connected since</dt><dd>{{.S.Since.Format "15:04:05"}}</dd>{{end}}
+<dt>Restarts</dt><dd>{{.Restarts}}</dd></dl>
+{{if .S.LastError}}<p class="muted bad">{{.S.LastError}}</p>{{end}}
+{{if not .S.Connected}}<p class="muted">Turn the camera on (Wi-Fi + PC Remote).</p>{{end}}</section>
+{{range .Plugins}}{{if or .Headline .Rows}}<section class="card"><h2>{{.Title}}</h2>
+{{if .Headline}}<p class="big">{{if .Level}}<span class="dot {{cls .Level}}"></span>{{end}}{{.Headline}}</p>{{end}}
+<dl>{{range .Rows}}<dt>{{.Label}}</dt><dd>{{if .Link}}<a href="{{.Link}}" target="_blank" rel="noopener">{{.Value}}</a>{{else}}{{.Value}}{{end}}</dd>{{end}}</dl></section>{{end}}
+{{if .Counts}}<section class="card"><h2>Queue</h2>
+<dl>{{range .Counts}}{{if or .N (not .Bad)}}<dt>{{.Label}}</dt><dd{{if .Bad}} class="bad"{{end}}>{{.N}}</dd>{{end}}{{end}}</dl></section>{{end}}
+{{if .Totals}}<section class="card"><h2>Since start</h2>
+<dl>{{range .Totals}}<dt>{{.Label}}</dt><dd>{{.Value}}</dd>{{end}}</dl></section>{{end}}
+{{end}}</div>
+{{range .Plugins}}{{if .Problems}}<section class="card"><h2>Problems</h2><div class="scroll"><table><thead><tr><th>File</th><th>Status</th><th>Tries</th><th>Last error</th><th>When</th></tr></thead><tbody>
+{{range .Problems}}<tr><td title="{{.Path}}">{{if .Name}}{{.Name}}{{else}}{{base .Path}}{{end}}</td><td>{{template "badge" .Status}}</td><td>{{.Attempts}}</td><td class="err">{{short .Note}}</td><td>{{ago .Updated}}</td></tr>{{end}}
+</tbody></table></div></section>{{end}}
+{{if .Recent}}<section class="card"><h2>Recent files</h2><div class="scroll"><table><thead><tr><th>File</th><th>Status</th><th>Size</th><th>When</th></tr></thead><tbody>
+{{range .Recent}}<tr><td title="{{.Path}}">{{if .Link}}<a href="{{.Link}}" target="_blank" rel="noopener">{{if .Name}}{{.Name}}{{else}}{{base .Path}}{{end}}</a>{{else if .Name}}{{.Name}}{{else}}{{base .Path}}{{end}}</td><td>{{template "badge" .Status}}</td><td>{{if .Size}}{{bytes .Size}}{{end}}</td><td>{{ago .Updated}}</td></tr>{{end}}
+</tbody></table></div><p><a href="/files">All files →</a></p></section>{{end}}
+{{if .Actions}}{{$n := .Name}}<div class="actions">{{range .Actions}}<form method="post" action="/plugins/{{$n}}/actions/{{.ID}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button{{if not .Primary}} class="secondary"{{end}}>{{.Label}}</button></form>{{end}}</div>{{end}}
+{{end}}{{end}}

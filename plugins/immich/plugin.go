@@ -29,7 +29,7 @@ func (*Plugin) Name() string { return "immich" }
 func (*Plugin) Fields() []plugin.Field {
 	return []plugin.Field{
 		{Key: "url", Label: "Immich address", Help: "e.g. http://immich:2283"},
-		{Key: "api_key", Label: "API key", Secret: true, Help: "needs asset.upload (plus album.read, album.create, albumAsset.create for an album)"},
+		{Key: "api_key", Label: "API key", Kind: plugin.FieldSecret, Help: "needs asset.upload (plus album.read, album.create, albumAsset.create for an album)"},
 		{Key: "album", Label: "Album (optional)"},
 		{Key: "delete_after_upload", Label: "Delete from the card after upload (true/false)"},
 		{Key: "interval", Label: "Check interval (default 2m)"},

@@ -23,9 +23,12 @@ type Camera interface {
 
 // Field describes one setting of a plugin for the settings page.
 type Field struct {
-	Key, Label string
-	Secret     bool // shown as a password field, never echoed back
-	Help       string
+	Key, Label  string
+	Kind        FieldKind // FieldSecret is shown as a password field, never echoed back
+	Default     string    // shown as placeholder; the plugin applies it itself
+	Group       string    // card heading; empty = "Plugin: <name>"
+	Placeholder string
+	Help        string
 }
 
 // Env is handed to Run.

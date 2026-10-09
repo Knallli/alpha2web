@@ -2,6 +2,9 @@ package webui
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/knallli/alpha2web/internal/settings"
 	"github.com/knallli/alpha2web/plugin"
@@ -19,10 +22,23 @@ type pluginField struct {
 	plugin.Field
 	Input, Value string
 	IsSet        bool
+	Checked      bool
 }
 
-type pluginSection struct {
-	Name   string
+// Type is the HTML input type.
+func (f pluginField) Type() string {
+	switch f.Kind {
+	case plugin.FieldSecret:
+		return "password"
+	case plugin.FieldBool:
+		return "checkbox"
+	}
+	return "text"
+}
+
+// pluginCard is one settings card: the fields of a plugin sharing a Group.
+type pluginCard struct {
+	Title  string
 	Fields []pluginField
 }
 
@@ -32,18 +48,30 @@ func (h *Handler) settingsPage(w http.ResponseWriter, r *http.Request) {
 	for _, f := range []string{"host", "mac", "user", "password", "fingerprint"} {
 		lock[f] = h.Settings.Locked(f)
 	}
-	var secs []pluginSection
+	var cards []pluginCard
 	for _, p := range plugin.All() {
-		sec := pluginSection{Name: p.Name()}
+		idx := map[string]int{}
 		for _, f := range p.Fields() {
 			saved := v.Plugins[p.Name()][f.Key]
-			val := saved
-			if f.Secret {
-				val = ""
+			pf := pluginField{Field: f, Input: "plugin." + p.Name() + "." + f.Key, Value: saved, IsSet: saved != ""}
+			switch f.Kind {
+			case plugin.FieldSecret:
+				pf.Value = ""
+			case plugin.FieldBool:
+				pf.Checked = saved == "true" || saved == "" && f.Default == "true"
 			}
-			sec.Fields = append(sec.Fields, pluginField{Field: f, Input: "plugin." + p.Name() + "." + f.Key, Value: val, IsSet: saved != ""})
+			title := f.Group
+			if title == "" {
+				title = "Plugin: " + p.Name()
+			}
+			i, ok := idx[title]
+			if !ok {
+				i = len(cards)
+				idx[title] = i
+				cards = append(cards, pluginCard{Title: title})
+			}
+			cards[i].Fields = append(cards[i].Fields, pf)
 		}
-		secs = append(secs, sec)
 	}
 	h.render(w, "settings.html", struct {
 		page
@@ -51,8 +79,8 @@ func (h *Handler) settingsPage(w http.ResponseWriter, r *http.Request) {
 		HasPass bool
 		Lock    map[string]bool
 		Msg     string
-		Plugins []pluginSection
-	}{h.pg("Settings", "settings"), v, v.CameraPassword != "", lock, r.URL.Query().Get("done"), secs})
+		Plugins []pluginCard
+	}{h.pg("Settings", "settings"), v, v.CameraPassword != "", lock, r.URL.Query().Get("done"), cards})
 }
 
 func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
@@ -79,12 +107,37 @@ func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
 	for _, p := range plugin.All() {
 		m := map[string]string{}
 		for _, f := range p.Fields() {
-			val := r.FormValue("plugin." + p.Name() + "." + f.Key)
-			if val == "" && f.Secret {
-				val = v.Plugins[p.Name()][f.Key]
+			in := "plugin." + p.Name() + "." + f.Key
+			val := strings.TrimSpace(r.FormValue(in))
+			switch f.Kind {
+			case plugin.FieldSecret:
+				if val == "" {
+					val = v.Plugins[p.Name()][f.Key]
+				}
+			case plugin.FieldBool:
+				// An unchecked box posts nothing; the marker tells it from a missing field.
+				if val == "" && r.FormValue(in+".present") != "" {
+					val = "false"
+				}
+			case plugin.FieldDuration:
+				if _, err := time.ParseDuration(val); val != "" && err != nil {
+					http.Error(w, f.Label+": not a duration like 30s or 2m", http.StatusBadRequest)
+					return
+				}
+			case plugin.FieldInt:
+				if _, err := strconv.Atoi(val); val != "" && err != nil {
+					http.Error(w, f.Label+": not a whole number", http.StatusBadRequest)
+					return
+				}
 			}
 			if val != "" {
 				m[f.Key] = val
+			}
+		}
+		if cv, ok := p.(plugin.ConfigValidator); ok {
+			if err := cv.Validate(m); err != nil {
+				http.Error(w, p.Name()+": "+err.Error(), http.StatusBadRequest)
+				return
 			}
 		}
 		plugins[p.Name()] = m

@@ -21,7 +21,7 @@ import (
 //go:embed templates/*.html static/*
 var assets embed.FS
 
-var tmpl = template.Must(template.ParseFS(assets, "templates/*.html"))
+var tmpl = template.Must(template.New("").Funcs(funcs).ParseFS(assets, "templates/*.html"))
 
 var levels = map[string]slog.Level{"debug": slog.LevelDebug, "info": slog.LevelInfo, "warn": slog.LevelWarn, "error": slog.LevelError}
 
@@ -80,14 +80,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) mux() *http.ServeMux {
 	m := http.NewServeMux()
-	m.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
+	m.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		h.render(w, "dashboard.html", struct {
 			page
-			S camera.Status
-		}{h.pg("Dashboard", "dashboard"), h.Camera.Status()})
+			Msg string
+			D   dashData
+		}{h.pg("Dashboard", "dashboard"), r.URL.Query().Get("msg"), h.dash(r.Context())})
 	})
-	m.HandleFunc("GET /fragment/dashboard", func(w http.ResponseWriter, _ *http.Request) {
-		h.render(w, "status", h.Camera.Status())
+	m.HandleFunc("GET /fragment/dashboard", func(w http.ResponseWriter, r *http.Request) {
+		h.render(w, "status", h.dash(r.Context()))
 	})
 	m.HandleFunc("GET /liveview", func(w http.ResponseWriter, _ *http.Request) {
 		h.render(w, "liveview.html", h.pg("Live view", "liveview"))
@@ -114,7 +115,12 @@ func (h *Handler) mux() *http.ServeMux {
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "ok connected=%v\n", h.Camera.Status().Connected)
 	})
-	ops := &health.Handler{Source: h.Camera, Version: h.Version, Extra: h.Extra}
+	ops := &health.Handler{Source: h.Camera, Version: h.Version, Plugins: pluginHealth, Extra: func(w io.Writer) {
+		if h.Extra != nil {
+			h.Extra(w)
+		}
+		pluginMetrics(w)
+	}}
 	m.HandleFunc("GET /health", ops.Health)
 	m.HandleFunc("GET /metrics", ops.Metrics)
 	if h.Settings != nil {
@@ -123,6 +129,7 @@ func (h *Handler) mux() *http.ServeMux {
 	}
 	h.controlRoutes(m)
 	h.filesRoutes(m)
+	h.pluginRoutes(m)
 	h.galleryRoutes(m)
 	m.Handle("GET /static/", http.FileServerFS(assets))
 	return m

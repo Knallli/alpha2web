@@ -25,7 +25,8 @@ type Source interface {
 type Handler struct {
 	Source  Source
 	Version string
-	Extra   func(w io.Writer) // optional, appends metric lines (plugins)
+	Extra   func(w io.Writer)     // optional, appends metric lines (plugins)
+	Plugins func() map[string]any // optional, the "plugins" object of the report
 }
 
 type cameraInfo struct {
@@ -53,6 +54,9 @@ func (h *Handler) Health(w http.ResponseWriter, _ *http.Request) {
 	if !st.Connected {
 		rep.Status = "degraded"
 		rep.Problems = append(rep.Problems, "camera not connected")
+	}
+	if h.Plugins != nil {
+		rep.Plugins = h.Plugins()
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(rep)

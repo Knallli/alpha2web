@@ -9,9 +9,11 @@
 {{if .HasPass}}<label class="check"><input type="checkbox" name="clear_password" value="1"> Remove the stored password</label>{{end}}
 <label for="fingerprint">SSH fingerprint (SHA256:…)</label><input id="fingerprint" name="fingerprint" value="{{.V.CameraFingerprint}}"{{if .Lock.fingerprint}} disabled{{end}}>
 <p class="muted">Fields set by environment variables are locked.</p></section>
-{{range .Plugins}}<section class="card"><h2>Plugin: {{.Name}}</h2>
-{{range .Fields}}<label for="{{.Input}}">{{.Label}}{{if and .Secret .IsSet}} (set; leave empty to keep){{end}}</label>
-<input id="{{.Input}}" name="{{.Input}}" {{if .Secret}}type="password" autocomplete="new-password"{{else}}value="{{.Value}}"{{end}}>
-{{if .Help}}<p class="muted">{{.Help}}</p>{{end}}{{end}}</section>{{end}}
+{{range .Plugins}}<section class="card"><h2>{{.Title}}</h2>
+{{range .Fields}}{{if eq .Type "checkbox"}}<input type="hidden" name="{{.Input}}.present" value="1">
+<label class="check"><input id="{{.Input}}" name="{{.Input}}" type="checkbox" value="true"{{if .Checked}} checked{{end}}> {{.Label}}</label>
+{{else}}<label for="{{.Input}}">{{.Label}}{{if and (eq .Type "password") .IsSet}} (set; leave empty to keep){{end}}</label>
+<input id="{{.Input}}" name="{{.Input}}" {{if eq .Type "password"}}type="password" autocomplete="new-password"{{else}}value="{{.Value}}"{{end}}{{with .Placeholder}} placeholder="{{.}}"{{else}}{{with .Default}} placeholder="{{.}}"{{end}}{{end}}>
+{{end}}{{if .Help}}<p class="muted">{{.Help}}</p>{{end}}{{end}}</section>{{end}}
 <p><button>Save</button></p></form>
 {{template "footer" .}}
