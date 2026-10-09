@@ -14,3 +14,9 @@ document.querySelectorAll("[data-refresh]").forEach((el) => {
   if (el.dataset.scroll) el.scrollTop = el.scrollHeight;
   setInterval(tick, every);
 });
+
+// Forms with data-confirm ask first (kept out of inline handlers for CSP).
+document.addEventListener("submit", (e) => {
+  const msg = e.target.dataset && e.target.dataset.confirm;
+  if (msg && !confirm(msg)) e.preventDefault();
+});

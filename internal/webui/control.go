@@ -3,6 +3,7 @@ package webui
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 
@@ -62,6 +63,10 @@ func (h *Handler) act(name string, fn func(r *http.Request, c *ptpip.Client) err
 		}
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		if r.FormValue("back") == "gallery" {
+			http.Redirect(w, r, "/gallery?slot="+strconv.FormatUint(uint64(slotParam(r)), 10)+"&done="+url.QueryEscape(name), http.StatusSeeOther)
 			return
 		}
 		http.Redirect(w, r, "/control?done="+name, http.StatusSeeOther)

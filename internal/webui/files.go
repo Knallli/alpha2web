@@ -80,6 +80,8 @@ func (h *Handler) filesRoutes(m *http.ServeMux) {
 		if err != nil {
 			return err
 		}
-		return c.SonyDeleteContent(r.Context(), slotParam(r), uint32(id))
+		err = c.SonyDeleteContent(r.Context(), slotParam(r), uint32(id))
+		h.galleryState().invalidate()
+		return err
 	}))
 }

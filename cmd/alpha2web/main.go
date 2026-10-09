@@ -93,7 +93,7 @@ func main() {
 		func(name string) map[string]string { return store.Get().Plugins[name] })
 
 	srv := &http.Server{Addr: env("HTTP_ADDR", ":8765"), Handler: &webui.Handler{
-		Version: version, Camera: sup, Logs: ring, Logger: log, Password: os.Getenv("WEBUI_PASSWORD"),
+		Version: version, Camera: sup, Logs: ring, Logger: log, Password: os.Getenv("WEBUI_PASSWORD"), CacheDir: filepath.Join(dataDir, "cache"),
 		Settings: &webui.Settings{Store: store, Locked: locked, Apply: func(v settings.Values) { sup.SetConfig(effective(v, dataDir)) }},
 	}}
 	go func() { <-ctx.Done(); srv.Close() }()

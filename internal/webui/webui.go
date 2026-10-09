@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"sync"
 
 	"github.com/knallli/alpha2web/internal/camera"
 	"github.com/knallli/alpha2web/internal/logbuf"
@@ -29,6 +30,10 @@ type Handler struct {
 	Password string // optional HTTP basic auth password
 	Logger   *slog.Logger
 	Settings *Settings // nil hides the settings page
+	CacheDir string    // thumbnail/preview cache; empty disables caching
+
+	galOnce sync.Once
+	gal     gallery
 }
 
 type page struct {
@@ -89,6 +94,7 @@ func (h *Handler) mux() *http.ServeMux {
 	}
 	h.controlRoutes(m)
 	h.filesRoutes(m)
+	h.galleryRoutes(m)
 	m.Handle("GET /static/", http.FileServerFS(assets))
 	return m
 }
