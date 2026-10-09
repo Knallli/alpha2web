@@ -55,6 +55,10 @@ func (h *Handler) mux() *http.ServeMux {
 	m.HandleFunc("GET /fragment/dashboard", func(w http.ResponseWriter, _ *http.Request) {
 		h.render(w, "status", h.Camera.Status())
 	})
+	m.HandleFunc("GET /liveview", func(w http.ResponseWriter, _ *http.Request) {
+		h.render(w, "liveview.html", page{"Live view", "liveview", h.Version})
+	})
+	m.HandleFunc("GET /liveview.mjpeg", h.liveStream)
 	m.HandleFunc("GET /logs", func(w http.ResponseWriter, r *http.Request) {
 		name, l := levelParam(r)
 		h.render(w, "logs.html", struct {

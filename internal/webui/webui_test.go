@@ -37,3 +37,17 @@ func TestPages(t *testing.T) {
 		t.Fatal("want 503 without camera")
 	}
 }
+
+func TestLiveviewNotConnected(t *testing.T) {
+	h := &Handler{Logs: logbuf.NewRing(1), Camera: camera.New(camera.Config{}, backoff.Default, slog.Default())}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("GET", "/liveview.mjpeg", nil))
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatal(w.Code)
+	}
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("GET", "/liveview", nil))
+	if w.Code != 200 {
+		t.Fatal(w.Code)
+	}
+}

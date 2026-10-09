@@ -128,3 +128,12 @@ func (s *Supervisor) session(ctx context.Context) error {
 		return c.Err()
 	}
 }
+
+// LiveView opens the camera's live-view stream.
+func (s *Supervisor) LiveView(ctx context.Context) (*ptpip.SonyLiveView, error) {
+	c, err := s.Client()
+	if err != nil {
+		return nil, err
+	}
+	return c.SonyOpenLiveView(ctx)
+}

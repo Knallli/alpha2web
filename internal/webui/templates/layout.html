@@ -2,7 +2,7 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}} · alpha2web</title><link rel="stylesheet" href="/static/style.css"><script src="/static/app.js" defer></script></head>
 <body><header><div class="bar"><a class="brand" href="/">alpha2web</a>
-<nav><a href="/"{{if eq .Nav "dashboard"}} aria-current="page"{{end}}>Dashboard</a><a href="/logs"{{if eq .Nav "logs"}} aria-current="page"{{end}}>Logs</a></nav></div></header>
+<nav><a href="/"{{if eq .Nav "dashboard"}} aria-current="page"{{end}}>Dashboard</a><a href="/liveview"{{if eq .Nav "liveview"}} aria-current="page"{{end}}>Live view</a><a href="/logs"{{if eq .Nav "logs"}} aria-current="page"{{end}}>Logs</a></nav></div></header>
 <main>{{end}}
 
 {{define "footer"}}</main><footer>alpha2web {{.Version}} · <a href="/healthz">health</a></footer></body></html>{{end}}
