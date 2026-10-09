@@ -41,6 +41,41 @@ type Supervisor struct {
 	mu     sync.Mutex
 	client *ptpip.Client
 	st     Status
+	subs   map[chan Event]struct{}
+}
+
+// Event is what subscribers receive: session changes and raw camera events.
+type Event struct {
+	Connected   *bool // set on connect (true) and disconnect (false)
+	ptpip.Event       // valid if Connected is nil
+}
+
+// Subscribe returns a channel of events and a function to stop. Slow
+// subscribers lose events rather than block the camera.
+func (s *Supervisor) Subscribe() (<-chan Event, func()) {
+	ch := make(chan Event, 64)
+	s.mu.Lock()
+	if s.subs == nil {
+		s.subs = map[chan Event]struct{}{}
+	}
+	s.subs[ch] = struct{}{}
+	s.mu.Unlock()
+	return ch, func() {
+		s.mu.Lock()
+		delete(s.subs, ch)
+		s.mu.Unlock()
+	}
+}
+
+func (s *Supervisor) publish(e Event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for ch := range s.subs {
+		select {
+		case ch <- e:
+		default:
+		}
+	}
 }
 
 func New(cfg Config, restart backoff.Policy, log *slog.Logger) *Supervisor {
@@ -114,18 +149,25 @@ func (s *Supervisor) session(ctx context.Context) error {
 	s.st = Status{Connected: true, Model: di.Model, Serial: di.SerialNumber, Host: s.cfg.Host, Since: time.Now()}
 	s.mu.Unlock()
 	s.log.Info("camera connected", "model", di.Model)
+	up, down := true, false
+	s.publish(Event{Connected: &up})
 	defer func() {
 		s.mu.Lock()
 		s.client = nil
 		s.st.Connected = false
 		s.mu.Unlock()
+		s.publish(Event{Connected: &down})
 	}()
 
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-c.Done():
-		return c.Err()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-c.Done():
+			return c.Err()
+		case e := <-c.Events():
+			s.publish(Event{Event: e})
+		}
 	}
 }
 

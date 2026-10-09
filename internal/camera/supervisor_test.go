@@ -42,3 +42,33 @@ func TestReconnect(t *testing.T) {
 	wait(false)
 	wait(true)
 }
+
+func TestSubscribe(t *testing.T) {
+	srv, err := ptpiptest.Start(ptpiptest.Options{Dir: t.TempDir(), A6700: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	s := New(Config{Host: srv.Addr()}, backoff.Default, slog.Default())
+	ch, stop := s.Subscribe()
+	defer stop()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.Run(ctx)
+	next := func() Event {
+		select {
+		case e := <-ch:
+			return e
+		case <-time.After(3 * time.Second):
+			t.Fatal("no event")
+			return Event{}
+		}
+	}
+	if e := next(); e.Connected == nil || !*e.Connected {
+		t.Fatalf("want connected, got %+v", e)
+	}
+	srv.Emit(0xC201, 7)
+	if e := next(); e.Connected != nil || e.Code != 0xC201 || e.Params[0] != 7 {
+		t.Fatalf("want ptp event, got %+v", e)
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"github.com/knallli/alpha2web/internal/camera"
 	"github.com/knallli/alpha2web/internal/logbuf"
 	"github.com/knallli/alpha2web/internal/webui"
+	"github.com/knallli/alpha2web/plugin"
 )
 
 func env(k, def string) string {
@@ -40,6 +41,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go sup.Run(ctx)
+	go plugin.RunAll(ctx, sup, log)
 
 	srv := &http.Server{Addr: env("HTTP_ADDR", ":8080"), Handler: &webui.Handler{Version: "dev", Camera: sup, Logs: ring, Password: os.Getenv("WEBUI_PASSWORD")}}
 	go func() { <-ctx.Done(); srv.Close() }()

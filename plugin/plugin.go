@@ -6,12 +6,17 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+
+	"github.com/knallli/alpha2go/ptpip"
+	"github.com/knallli/alpha2web/internal/camera"
 )
 
-// Camera is what a plugin sees of the connected camera.
+// Camera is what a plugin sees of the camera. *camera.Supervisor implements it.
 type Camera interface {
-	Model() string
-	Host() string
+	Status() camera.Status
+	// Client is only valid while the session lasts.
+	Client() (*ptpip.Client, error)
+	Subscribe() (events <-chan camera.Event, stop func())
 }
 
 // Plugin reacts to camera events, e.g. exports new images somewhere.
@@ -45,4 +50,21 @@ func All() []Plugin {
 		out = append(out, p)
 	}
 	return out
+}
+
+// RunAll starts every registered plugin and returns when ctx is done and all
+// of them have stopped. A plugin that fails is logged, not restarted.
+func RunAll(ctx context.Context, cam Camera, log *slog.Logger) {
+	var wg sync.WaitGroup
+	for _, p := range All() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			l := log.With("plugin", p.Name())
+			if err := p.Run(ctx, cam, l); err != nil && ctx.Err() == nil {
+				l.Error("plugin stopped", "err", err)
+			}
+		}()
+	}
+	wg.Wait()
 }
