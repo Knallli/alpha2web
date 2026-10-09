@@ -10,7 +10,21 @@ Tested on the a6700 only.
 - Settings page; environment variables override and lock the fields
 - Plugins (compiled in, see `plugin/`). The Immich exporter in `plugins/immich` uploads new files and can delete them from the card afterwards.
 
-## Run
+## Install (Docker)
+
+```
+curl -O https://raw.githubusercontent.com/knallli/alpha2web/main/docker-compose.yml
+docker compose up -d
+```
+
+Open `http://<host>:8765/settings` and enter the camera address. Settings are kept in the `data` volume.
+Optional: copy [.env.example](.env.example) to `.env` (camera address, Access Authentication, `WEBUI_PASSWORD`).
+**Set `WEBUI_PASSWORD`**: the UI can fire the shutter and delete files from the card.
+Update with `docker compose pull && docker compose up -d`. Images are published to `ghcr.io/knallli/alpha2web` for amd64 and arm64.
+
+Camera setup (Wi-Fi, PC Remote, Access Authentication): see [alpha2go](https://github.com/Knallli/alpha2go/blob/main/docs/camera-setup.md).
+
+## Run without Docker
 
 ```
 CAMERA_HOST=192.168.1.50 go run ./cmd/alpha2web
@@ -20,11 +34,9 @@ CAMERA_HOST=192.168.1.50 go run ./cmd/alpha2web
 |---|---|
 | `CAMERA_HOST` | camera address |
 | `CAMERA_USER`, `CAMERA_PASSWORD`, `CAMERA_FINGERPRINT` | Access Authentication (SSH tunnel) |
-| `HTTP_ADDR` | listen address, default `:8080` |
+| `HTTP_ADDR` | listen address, default `:8765` |
 | `DATA_DIR` | settings and plugin state, default `data` |
-| `WEBUI_PASSWORD` | optional HTTP basic auth password for the whole UI |
-
-alpha2go is a local `replace` for now (`../alpha2go`); see the Dockerfile for the build context.
+| `WEBUI_PASSWORD` | optional HTTP basic auth password for the whole UI (`/healthz` stays open) |
 
 ## Limits
 

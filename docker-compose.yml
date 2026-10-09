@@ -1,0 +1,28 @@
+# alpha2web: web UI for a Sony Alpha camera.
+#
+#   docker compose up -d
+#   open http://<this-host>:8765/settings  ->  enter the camera address
+#
+# Optional settings (camera address, password for the UI, ...) can go into a
+# .env file, see .env.example.
+services:
+  alpha2web:
+    image: ghcr.io/knallli/alpha2web:latest
+    container_name: alpha2web
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - data:/data   # settings (incl. camera password, API keys), plugin state, staging
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  data:

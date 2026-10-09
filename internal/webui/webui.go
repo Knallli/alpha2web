@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"embed"
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"log/slog"
 	"net/http"
@@ -35,7 +36,7 @@ type page struct {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if h.Password != "" {
+	if h.Password != "" && r.URL.Path != "/healthz" {
 		_, pass, ok := r.BasicAuth()
 		if !ok || subtle.ConstantTimeCompare([]byte(pass), []byte(h.Password)) != 1 {
 			w.Header().Set("WWW-Authenticate", `Basic realm="alpha2web"`)
@@ -78,10 +79,9 @@ func (h *Handler) mux() *http.ServeMux {
 		w.Header().Set("Content-Type", "application/json")
 		writeJSON(w, h.Camera.Status())
 	})
+	// Liveness only: stays 200 while the camera is off, so Docker does not restart the container.
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		if !h.Camera.Status().Connected {
-			http.Error(w, "camera not connected", http.StatusServiceUnavailable)
-		}
+		fmt.Fprintf(w, "ok connected=%v\n", h.Camera.Status().Connected)
 	})
 	if h.Settings != nil {
 		m.HandleFunc("GET /settings", h.settingsPage)

@@ -38,8 +38,8 @@ func TestPages(t *testing.T) {
 			t.Errorf("%s: %d %q", path, w.Code, w.Body.String())
 		}
 	}
-	if get("/healthz", true).Code != http.StatusServiceUnavailable {
-		t.Fatal("want 503 without camera")
+	if w := get("/healthz", false); w.Code != 200 || !strings.Contains(w.Body.String(), "connected=false") {
+		t.Fatal("healthz must be open and 200 without camera")
 	}
 }
 

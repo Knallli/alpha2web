@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/knallli/alpha2go/ptpip"
 	"github.com/knallli/alpha2web/internal/backoff"
@@ -43,7 +46,34 @@ func effective(v settings.Values) camera.Config {
 	return cfg
 }
 
+var version = "dev"
+
+// subcommand handles "version" and "healthcheck" (used by Docker's HEALTHCHECK).
+func subcommand(arg string) {
+	switch arg {
+	case "version":
+		fmt.Println(version)
+	case "healthcheck":
+		addr := env("HTTP_ADDR", ":8765")
+		if strings.HasPrefix(addr, ":") {
+			addr = "127.0.0.1" + addr
+		}
+		c := http.Client{Timeout: 5 * time.Second}
+		resp, err := c.Get("http://" + addr + "/healthz")
+		if err != nil || resp.StatusCode != 200 {
+			os.Exit(1)
+		}
+	default:
+		fmt.Fprintln(os.Stderr, "unknown command", arg)
+		os.Exit(2)
+	}
+	os.Exit(0)
+}
+
 func main() {
+	if len(os.Args) > 1 {
+		subcommand(os.Args[1])
+	}
 	ring := logbuf.NewRing(500)
 	log := slog.New(logbuf.NewHandler(slog.NewTextHandler(os.Stderr, nil), ring))
 	slog.SetDefault(log)
@@ -62,8 +92,8 @@ func main() {
 	go plugin.RunAll(ctx, plugin.Env{Camera: sup, Log: log, DataDir: dataDir},
 		func(name string) map[string]string { return store.Get().Plugins[name] })
 
-	srv := &http.Server{Addr: env("HTTP_ADDR", ":8080"), Handler: &webui.Handler{
-		Version: "dev", Camera: sup, Logs: ring, Logger: log, Password: os.Getenv("WEBUI_PASSWORD"),
+	srv := &http.Server{Addr: env("HTTP_ADDR", ":8765"), Handler: &webui.Handler{
+		Version: version, Camera: sup, Logs: ring, Logger: log, Password: os.Getenv("WEBUI_PASSWORD"),
 		Settings: &webui.Settings{Store: store, Locked: locked, Apply: func(v settings.Values) { sup.SetConfig(effective(v)) }},
 	}}
 	go func() { <-ctx.Done(); srv.Close() }()
