@@ -6,29 +6,31 @@ import (
 	"testing"
 )
 
-type fake struct{}
+type fake struct{ got chan string }
 
-func (fake) Name() string { return "fake" }
+func (fake) Name() string    { return "fake" }
+func (fake) Fields() []Field { return nil }
+func (f fake) Run(_ context.Context, env Env) error {
+	f.got <- env.Config()["k"]
+	return nil
+}
 
-var ran = make(chan struct{}, 1)
-
-func (fake) Run(context.Context, Camera, *slog.Logger) error { ran <- struct{}{}; return nil }
-
-func TestRegister(t *testing.T) {
-	Register(fake{})
+func TestRegisterAndRun(t *testing.T) {
+	f := fake{make(chan string, 1)}
+	Register(f)
 	if len(All()) != 1 {
 		t.Fatal("want 1 plugin")
 	}
-	RunAll(context.Background(), nil, slog.Default())
-	select {
-	case <-ran:
-	default:
-		t.Fatal("plugin did not run")
+	RunAll(context.Background(), Env{Log: slog.Default()}, func(name string) map[string]string {
+		return map[string]string{"k": name}
+	})
+	if v := <-f.got; v != "fake" {
+		t.Fatalf("config %q", v)
 	}
 	defer func() {
 		if recover() == nil {
 			t.Fatal("duplicate should panic")
 		}
 	}()
-	Register(fake{})
+	Register(f)
 }

@@ -1,12 +1,16 @@
 {{template "header" .}}
 {{if .Msg}}<div class="msg ok">Saved. The camera connection restarts with the new values.</div>{{end}}
-<section class="card"><h2>Camera</h2>
 <form method="post" action="/settings">
+<section class="card"><h2>Camera</h2>
 <label for="host">Camera address</label><input id="host" name="host" value="{{.V.CameraHost}}" placeholder="192.168.1.50"{{if .Lock.host}} disabled{{end}}>
 <label for="user">Access Authentication user (optional)</label><input id="user" name="user" value="{{.V.CameraUser}}"{{if .Lock.user}} disabled{{end}}>
 <label for="password">Password{{if .HasPass}} (set; leave empty to keep){{end}}</label><input id="password" name="password" type="password" autocomplete="new-password"{{if .Lock.password}} disabled{{end}}>
 {{if .HasPass}}<label class="check"><input type="checkbox" name="clear_password" value="1"> Remove the stored password</label>{{end}}
 <label for="fingerprint">SSH fingerprint (SHA256:…)</label><input id="fingerprint" name="fingerprint" value="{{.V.CameraFingerprint}}"{{if .Lock.fingerprint}} disabled{{end}}>
-<p class="muted">Fields set by environment variables are locked.</p>
-<p><button>Save</button></p></form></section>
+<p class="muted">Fields set by environment variables are locked.</p></section>
+{{range .Plugins}}<section class="card"><h2>Plugin: {{.Name}}</h2>
+{{range .Fields}}<label for="{{.Input}}">{{.Label}}{{if and .Secret .IsSet}} (set; leave empty to keep){{end}}</label>
+<input id="{{.Input}}" name="{{.Input}}" {{if .Secret}}type="password" autocomplete="new-password"{{else}}value="{{.Value}}"{{end}}>
+{{if .Help}}<p class="muted">{{.Help}}</p>{{end}}{{end}}</section>{{end}}
+<p><button>Save</button></p></form>
 {{template "footer" .}}

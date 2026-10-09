@@ -16,6 +16,7 @@ import (
 	"github.com/knallli/alpha2web/internal/settings"
 	"github.com/knallli/alpha2web/internal/webui"
 	"github.com/knallli/alpha2web/plugin"
+	_ "github.com/knallli/alpha2web/plugins/immich"
 )
 
 func env(k, def string) string {
@@ -47,7 +48,8 @@ func main() {
 	log := slog.New(logbuf.NewHandler(slog.NewTextHandler(os.Stderr, nil), ring))
 	slog.SetDefault(log)
 
-	store, err := settings.Open(filepath.Join(env("DATA_DIR", "data"), "settings.json"))
+	dataDir := env("DATA_DIR", "data")
+	store, err := settings.Open(filepath.Join(dataDir, "settings.json"))
 	if err != nil {
 		log.Error("settings", "err", err)
 		os.Exit(1)
@@ -57,7 +59,8 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go sup.Run(ctx)
-	go plugin.RunAll(ctx, sup, log)
+	go plugin.RunAll(ctx, plugin.Env{Camera: sup, Log: log, DataDir: dataDir},
+		func(name string) map[string]string { return store.Get().Plugins[name] })
 
 	srv := &http.Server{Addr: env("HTTP_ADDR", ":8080"), Handler: &webui.Handler{
 		Version: "dev", Camera: sup, Logs: ring, Logger: log, Password: os.Getenv("WEBUI_PASSWORD"),

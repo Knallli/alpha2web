@@ -5,6 +5,8 @@ package plugin
 import (
 	"context"
 	"log/slog"
+	"slices"
+	"strings"
 	"sync"
 
 	"github.com/knallli/alpha2go/ptpip"
@@ -19,11 +21,28 @@ type Camera interface {
 	Subscribe() (events <-chan camera.Event, stop func())
 }
 
+// Field describes one setting of a plugin for the settings page.
+type Field struct {
+	Key, Label string
+	Secret     bool // shown as a password field, never echoed back
+	Help       string
+}
+
+// Env is handed to Run.
+type Env struct {
+	Camera  Camera
+	Log     *slog.Logger
+	DataDir string
+	// Config returns the plugin's current settings; call it again to see changes.
+	Config func() map[string]string
+}
+
 // Plugin reacts to camera events, e.g. exports new images somewhere.
 type Plugin interface {
 	Name() string
+	Fields() []Field
 	// Run blocks until ctx is done.
-	Run(ctx context.Context, cam Camera, log *slog.Logger) error
+	Run(ctx context.Context, env Env) error
 }
 
 var (
@@ -41,7 +60,7 @@ func Register(p Plugin) {
 	registry[p.Name()] = p
 }
 
-// All returns the registered plugins.
+// All returns the registered plugins sorted by name.
 func All() []Plugin {
 	mu.Lock()
 	defer mu.Unlock()
@@ -49,20 +68,24 @@ func All() []Plugin {
 	for _, p := range registry {
 		out = append(out, p)
 	}
+	slices.SortFunc(out, func(a, b Plugin) int { return strings.Compare(a.Name(), b.Name()) })
 	return out
 }
 
 // RunAll starts every registered plugin and returns when ctx is done and all
-// of them have stopped. A plugin that fails is logged, not restarted.
-func RunAll(ctx context.Context, cam Camera, log *slog.Logger) {
+// of them have stopped. config(name) supplies each plugin's settings. A plugin
+// that fails is logged, not restarted.
+func RunAll(ctx context.Context, base Env, config func(name string) map[string]string) {
 	var wg sync.WaitGroup
 	for _, p := range All() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			l := log.With("plugin", p.Name())
-			if err := p.Run(ctx, cam, l); err != nil && ctx.Err() == nil {
-				l.Error("plugin stopped", "err", err)
+			env := base
+			env.Log = base.Log.With("plugin", p.Name())
+			env.Config = func() map[string]string { return config(p.Name()) }
+			if err := p.Run(ctx, env); err != nil && ctx.Err() == nil {
+				env.Log.Error("plugin stopped", "err", err)
 			}
 		}()
 	}

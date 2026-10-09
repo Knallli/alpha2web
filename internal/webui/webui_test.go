@@ -1,7 +1,9 @@
 package webui
 
 import (
+	"context"
 	"github.com/knallli/alpha2web/internal/settings"
+	"github.com/knallli/alpha2web/plugin"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -85,5 +87,36 @@ func TestSettingsSave(t *testing.T) {
 	h.ServeHTTP(w, httptest.NewRequest("GET", "/settings", nil))
 	if w.Code != 200 || strings.Contains(w.Body.String(), "pw") {
 		t.Fatal("settings page")
+	}
+}
+
+type testPlugin struct{}
+
+func (testPlugin) Name() string { return "tp" }
+func (testPlugin) Fields() []plugin.Field {
+	return []plugin.Field{{Key: "url", Label: "URL"}, {Key: "secret", Label: "Secret", Secret: true}}
+}
+func (testPlugin) Run(context.Context, plugin.Env) error { return nil }
+
+func TestPluginSettings(t *testing.T) {
+	plugin.Register(testPlugin{})
+	store, _ := settings.Open(filepath.Join(t.TempDir(), "s.json"))
+	h := &Handler{Logs: logbuf.NewRing(1), Camera: camera.New(camera.Config{}, backoff.Default, slog.Default()),
+		Settings: &Settings{Store: store, Locked: func(string) bool { return false }, Apply: func(settings.Values) {}}}
+	post := func(form url.Values) {
+		r := httptest.NewRequest("POST", "/settings", strings.NewReader(form.Encode()))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		h.ServeHTTP(httptest.NewRecorder(), r)
+	}
+	post(url.Values{"plugin.tp.url": {"u"}, "plugin.tp.secret": {"s3"}})
+	post(url.Values{"plugin.tp.url": {"u2"}}) // empty secret keeps the old one
+	got := store.Get().Plugins["tp"]
+	if got["url"] != "u2" || got["secret"] != "s3" {
+		t.Fatalf("%v", got)
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("GET", "/settings", nil))
+	if !strings.Contains(w.Body.String(), "Plugin: tp") || strings.Contains(w.Body.String(), "s3") {
+		t.Fatal("plugin section missing or secret leaked")
 	}
 }
