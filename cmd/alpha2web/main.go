@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,6 +11,8 @@ import (
 	"github.com/knallli/alpha2go/ptpip"
 	"github.com/knallli/alpha2web/internal/backoff"
 	"github.com/knallli/alpha2web/internal/camera"
+	"github.com/knallli/alpha2web/internal/logbuf"
+	"github.com/knallli/alpha2web/internal/webui"
 )
 
 func env(k, def string) string {
@@ -22,7 +23,9 @@ func env(k, def string) string {
 }
 
 func main() {
-	log := slog.Default()
+	ring := logbuf.NewRing(500)
+	log := slog.New(logbuf.NewHandler(slog.NewTextHandler(os.Stderr, nil), ring))
+	slog.SetDefault(log)
 	host := os.Getenv("CAMERA_HOST")
 	if host == "" {
 		log.Error("CAMERA_HOST is required")
@@ -38,16 +41,7 @@ func main() {
 	defer stop()
 	go sup.Run(ctx)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/status", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(sup.Status())
-	})
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		if !sup.Status().Connected {
-			http.Error(w, "camera not connected", http.StatusServiceUnavailable)
-		}
-	})
-	srv := &http.Server{Addr: env("HTTP_ADDR", ":8080"), Handler: mux}
+	srv := &http.Server{Addr: env("HTTP_ADDR", ":8080"), Handler: &webui.Handler{Version: "dev", Camera: sup, Logs: ring, Password: os.Getenv("WEBUI_PASSWORD")}}
 	go func() { <-ctx.Done(); srv.Close() }()
 	log.Info("listening", "addr", srv.Addr)
 	if err := srv.ListenAndServe(); err != nil && ctx.Err() == nil {

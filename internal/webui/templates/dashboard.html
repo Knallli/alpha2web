@@ -1,0 +1,12 @@
+{{template "header" .}}
+<div data-refresh="/fragment/dashboard" data-every="3000">{{template "status" .S}}</div>
+{{template "footer" .}}
+
+{{define "status"}}<section class="card"><h2>Camera</h2>
+<p class="big">{{if .Connected}}<span class="dot ok"></span>Connected{{else}}<span class="dot wait"></span>Searching…{{end}}</p>
+<dl><dt>Address</dt><dd>{{.Host}}</dd>
+{{if .Model}}<dt>Model</dt><dd>{{.Model}}</dd>{{end}}
+{{if .Serial}}<dt>Serial</dt><dd>{{.Serial}}</dd>{{end}}
+{{if .Connected}}<dt>Connected since</dt><dd>{{.Since.Format "15:04:05"}}</dd>{{end}}</dl>
+{{if .LastError}}<p class="muted bad">{{.LastError}}</p>{{end}}
+{{if not .Connected}}<p class="muted">Turn the camera on (Wi-Fi + PC Remote).</p>{{end}}</section>{{end}}

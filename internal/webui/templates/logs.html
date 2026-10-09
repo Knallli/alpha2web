@@ -1,0 +1,8 @@
+{{template "header" .}}
+<section class="card"><h2>Logs</h2>
+<form method="get" action="/logs" class="inline"><label for="lv">Level</label>
+<select id="lv" name="level">{{range .Levels}}<option{{if eq . $.Level}} selected{{end}}>{{.}}</option>{{end}}</select><button class="secondary">Show</button></form>
+<div class="log" data-refresh="/fragment/logs?level={{.Level}}" data-every="2000" data-scroll="1">{{template "logrows" .Entries}}</div></section>
+{{template "footer" .}}
+
+{{define "logrows"}}{{range .}}<div class="l-{{.Level}}"><span class="t">{{.Time.Format "15:04:05"}}</span> <b>{{.Level}}</b> {{.Msg}} <span class="a">{{.Attrs}}</span></div>{{else}}<div class="muted">No log entries.</div>{{end}}{{end}}
