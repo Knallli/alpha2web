@@ -29,7 +29,7 @@ type pluginSection struct {
 func (h *Handler) settingsPage(w http.ResponseWriter, r *http.Request) {
 	v := h.Settings.Store.Get()
 	lock := map[string]bool{}
-	for _, f := range []string{"host", "user", "password", "fingerprint"} {
+	for _, f := range []string{"host", "mac", "user", "password", "fingerprint"} {
 		lock[f] = h.Settings.Locked(f)
 	}
 	var secs []pluginSection
@@ -67,6 +67,7 @@ func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	set("host", &v.CameraHost)
+	set("mac", &v.CameraMAC)
 	set("user", &v.CameraUser)
 	set("fingerprint", &v.CameraFingerprint)
 	// An empty password field keeps the stored one; "clear" removes it.

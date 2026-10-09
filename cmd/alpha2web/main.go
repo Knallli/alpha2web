@@ -31,15 +31,15 @@ func env(k, def string) string {
 
 // envFor maps a settings field to the variable that overrides it.
 var envFor = map[string]string{
-	"host": "CAMERA_HOST", "user": "CAMERA_USER", "password": "CAMERA_PASSWORD", "fingerprint": "CAMERA_FINGERPRINT",
+	"host": "CAMERA_HOST", "mac": "CAMERA_MAC", "user": "CAMERA_USER", "password": "CAMERA_PASSWORD", "fingerprint": "CAMERA_FINGERPRINT",
 }
 
 func locked(field string) bool { return os.Getenv(envFor[field]) != "" }
 
 // effective merges the saved settings with the environment (environment wins).
-func effective(v settings.Values) camera.Config {
+func effective(v settings.Values, dataDir string) camera.Config {
 	pick := func(field, saved string) string { return env(envFor[field], saved) }
-	cfg := camera.Config{Host: pick("host", v.CameraHost)}
+	cfg := camera.Config{Host: pick("host", v.CameraHost), MAC: pick("mac", v.CameraMAC), DataDir: dataDir}
 	if user := pick("user", v.CameraUser); user != "" {
 		cfg.SSH = &ptpip.SSHConfig{User: user, Password: pick("password", v.CameraPassword), Fingerprint: pick("fingerprint", v.CameraFingerprint)}
 	}
@@ -84,7 +84,7 @@ func main() {
 		log.Error("settings", "err", err)
 		os.Exit(1)
 	}
-	sup := camera.New(effective(store.Get()), backoff.Default, log)
+	sup := camera.New(effective(store.Get(), dataDir), backoff.Policy{Base: 5 * time.Second, Max: time.Minute, Jitter: 0.2}, log)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -94,7 +94,7 @@ func main() {
 
 	srv := &http.Server{Addr: env("HTTP_ADDR", ":8765"), Handler: &webui.Handler{
 		Version: version, Camera: sup, Logs: ring, Logger: log, Password: os.Getenv("WEBUI_PASSWORD"),
-		Settings: &webui.Settings{Store: store, Locked: locked, Apply: func(v settings.Values) { sup.SetConfig(effective(v)) }},
+		Settings: &webui.Settings{Store: store, Locked: locked, Apply: func(v settings.Values) { sup.SetConfig(effective(v, dataDir)) }},
 	}}
 	go func() { <-ctx.Done(); srv.Close() }()
 	log.Info("listening", "addr", srv.Addr)

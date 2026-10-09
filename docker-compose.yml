@@ -1,7 +1,10 @@
 # alpha2web: web UI for a Sony Alpha camera.
 #
 #   docker compose up -d
-#   open http://<this-host>:8765/settings  ->  enter the camera address
+#   open http://<this-host>:8765
+#
+# The camera is found automatically on the local network. A fixed address
+# can be set on the Settings page or in .env.
 #
 # Optional settings (camera address, password for the UI, ...) can go into a
 # .env file, see .env.example.
@@ -10,8 +13,9 @@ services:
     image: ghcr.io/knallli/alpha2web:latest
     container_name: alpha2web
     restart: unless-stopped
-    ports:
-      - "8765:8765"
+    # Needed to find the camera on the LAN (discovery does not cross Docker's bridge network).
+    # The UI listens on port 8765 of the host (HTTP_ADDR).
+    network_mode: host
     env_file:
       - path: .env
         required: false

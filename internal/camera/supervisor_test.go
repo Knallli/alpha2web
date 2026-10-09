@@ -2,7 +2,14 @@ package camera
 
 import (
 	"context"
+	"github.com/knallli/alpha2go/discovery"
 	"log/slog"
+	"net"
+	"net/netip"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -94,5 +101,35 @@ func TestSetConfig(t *testing.T) {
 		if !ok {
 			t.Fatalf("never connected to %s: %+v", c.model, s.Status())
 		}
+	}
+}
+
+func TestDiscovery(t *testing.T) {
+	srv, err := ptpiptest.Start(ptpiptest.Options{Dir: t.TempDir(), A6700: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	_, portStr, _ := net.SplitHostPort(srv.Addr())
+	port, _ := strconv.Atoi(portStr)
+	dir := t.TempDir()
+	cfg := Config{DataDir: dir, Discovery: discovery.Options{
+		Port: port, SSDPAddr: "-", Subnets: []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")},
+	}}
+	s := New(cfg, backoff.Policy{Base: 20 * time.Millisecond, Max: 50 * time.Millisecond}, slog.Default())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.Run(ctx)
+	for i := 0; !s.Status().Connected; i++ {
+		if i > 300 {
+			t.Fatalf("not found: %+v", s.Status())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "camera-host")); !strings.HasPrefix(string(got), "127.0.0.1:") {
+		t.Fatalf("cached host %q", got)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "ptpip-guid")); len(b) != 16 {
+		t.Fatal("guid not persisted")
 	}
 }

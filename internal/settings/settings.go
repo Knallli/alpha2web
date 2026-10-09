@@ -13,6 +13,7 @@ import (
 // Values are the settings that can be changed at runtime.
 type Values struct {
 	CameraHost        string `json:"camera_host,omitempty"`
+	CameraMAC         string `json:"camera_mac,omitempty"`
 	CameraUser        string `json:"camera_user,omitempty"`
 	CameraPassword    string `json:"camera_password,omitempty"`
 	CameraFingerprint string `json:"camera_fingerprint,omitempty"`

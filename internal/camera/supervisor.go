@@ -2,12 +2,18 @@
 package camera
 
 import (
+	"cmp"
 	"context"
+	"crypto/rand"
 	"errors"
 	"log/slog"
+	"net"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
+	"github.com/knallli/alpha2go/discovery"
 	"github.com/knallli/alpha2go/ptpip"
 	"github.com/knallli/alpha2web/internal/backoff"
 )
@@ -17,8 +23,13 @@ var ErrNotConnected = errors.New("camera not connected")
 
 // Config says how to reach the camera. SSH is optional (Access Authentication).
 type Config struct {
-	Host string
-	SSH  *ptpip.SSHConfig
+	Host    string // empty = find the camera on the local network
+	MAC     string // optional, makes the scan faster (ARP lookup)
+	SSH     *ptpip.SSHConfig
+	DataDir string // remembers the last address and the initiator GUID
+
+	// Discovery tunes the network scan (tests; zero values are fine).
+	Discovery discovery.Options
 }
 
 // Status is a snapshot for the UI and the health endpoint.
@@ -82,6 +93,86 @@ func (s *Supervisor) publish(e Event) {
 
 func New(cfg Config, restart backoff.Policy, log *slog.Logger) *Supervisor {
 	return &Supervisor{cfg: cfg, restart: restart, log: log, st: Status{Host: cfg.Host}, wake: make(chan struct{}, 1)}
+}
+
+// open connects to one address and opens the session.
+func open(ctx context.Context, host string, opts ptpip.Options) (*ptpip.Client, *ptpip.DeviceInfo, error) {
+	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	opts.DialTimeout = 5 * time.Second
+	c, err := ptpip.Dial(cctx, host, opts)
+	if err != nil {
+		return nil, nil, err
+	}
+	di, err := c.GetDeviceInfo(cctx)
+	if err == nil {
+		err = c.OpenSession(cctx, 1)
+	}
+	if err == nil && di.IsSony() {
+		_, err = c.SonyHandshake(cctx)
+	}
+	if err != nil {
+		c.Close()
+		return nil, nil, err
+	}
+	return c, di, nil
+}
+
+// candidates returns the configured host, or else the last known address and
+// whatever a network scan finds. With Access Authentication on, the camera
+// only answers on its SSH port, so that is what the scan looks for.
+func (s *Supervisor) candidates(ctx context.Context, cfg Config) ([]string, error) {
+	if cfg.Host != "" {
+		return []string{cfg.Host}, nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	add := func(h string) {
+		if host, _, err := net.SplitHostPort(h); err == nil && cfg.SSH != nil {
+			h = host // the scanned port is SSH's; PTP/IP goes through the tunnel on its default port
+		}
+		if h != "" && !seen[h] {
+			seen[h] = true
+			out = append(out, h)
+		}
+	}
+	if cfg.DataDir != "" {
+		if b, err := os.ReadFile(filepath.Join(cfg.DataDir, "camera-host")); err == nil {
+			add(string(b))
+		}
+	}
+	opts := cfg.Discovery
+	opts.MAC = cfg.MAC
+	if cfg.SSH != nil && opts.Port == 0 {
+		opts.Port = cmp.Or(cfg.SSH.Port, 22)
+	}
+	sctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	found := discovery.Find(sctx, opts)
+	s.log.Debug("network scan", "found", found)
+	for _, f := range found {
+		add(f)
+	}
+	if len(out) == 0 {
+		return nil, errors.New("no camera found on the network")
+	}
+	return out, nil
+}
+
+// guid returns a stable initiator identity (cameras remember paired hosts).
+func guid(dir string) (g [16]byte) {
+	if dir == "" {
+		return
+	}
+	p := filepath.Join(dir, "ptpip-guid")
+	if b, err := os.ReadFile(p); err == nil && len(b) == 16 {
+		copy(g[:], b)
+		return
+	}
+	rand.Read(g[:])
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(p, g[:], 0o600)
+	return
 }
 
 // SetConfig switches to a new camera address; a running session is dropped
@@ -148,31 +239,36 @@ func (s *Supervisor) session(parent context.Context) error {
 	cfg := s.cfg
 	s.cancel = cancel
 	s.mu.Unlock()
-	if cfg.Host == "" {
-		return errors.New("no camera address set")
-	}
-	opts := ptpip.Options{Name: "alpha2web"}
+
+	var d *ptpip.SSHDialer
+	opts := ptpip.Options{Name: "alpha2web", GUID: guid(cfg.DataDir)}
 	if cfg.SSH != nil {
-		d := ptpip.NewSSHDialer(*cfg.SSH)
+		d = ptpip.NewSSHDialer(*cfg.SSH)
 		defer d.Close()
 		opts.DialContext = d.DialContext
 	}
-	c, err := ptpip.Dial(ctx, cfg.Host, opts)
+	hosts, err := s.candidates(ctx, cfg)
 	if err != nil {
+		return err
+	}
+	var c *ptpip.Client
+	var di *ptpip.DeviceInfo
+	for _, h := range hosts {
+		if c, di, err = open(ctx, h, opts); err == nil {
+			cfg.Host = h
+			break
+		}
+		var ife *ptpip.InitFailError
+		if errors.As(err, &ife) || errors.Is(err, ptpip.ErrSSHAuth) {
+			return err // a camera answered but refused
+		}
+	}
+	if c == nil {
 		return err
 	}
 	defer c.Close()
-	di, err := c.GetDeviceInfo(ctx)
-	if err != nil {
-		return err
-	}
-	if err := c.OpenSession(ctx, 1); err != nil {
-		return err
-	}
-	if di.IsSony() {
-		if _, err := c.SonyHandshake(ctx); err != nil {
-			return err
-		}
+	if cfg.DataDir != "" {
+		os.WriteFile(filepath.Join(cfg.DataDir, "camera-host"), []byte(cfg.Host), 0o600)
 	}
 	s.mu.Lock()
 	s.client = c

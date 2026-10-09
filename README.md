@@ -17,7 +17,7 @@ curl -O https://raw.githubusercontent.com/knallli/alpha2web/main/docker-compose.
 docker compose up -d
 ```
 
-Open `http://<host>:8765/settings` and enter the camera address. Settings are kept in the `data` volume.
+Open `http://<host>:8765`. The camera is found automatically on the local network (the container uses `network_mode: host` for that); a fixed address can be set on the Settings page. Settings are kept in the `data` volume.
 Optional: copy [.env.example](.env.example) to `.env` (camera address, Access Authentication, `WEBUI_PASSWORD`).
 **Set `WEBUI_PASSWORD`**: the UI can fire the shutter and delete files from the card.
 Update with `docker compose pull && docker compose up -d`. Images are published to `ghcr.io/knallli/alpha2web` for amd64 and arm64.
@@ -32,7 +32,8 @@ CAMERA_HOST=192.168.1.50 go run ./cmd/alpha2web
 
 | Variable | Meaning |
 |---|---|
-| `CAMERA_HOST` | camera address |
+| `CAMERA_HOST` | camera address; empty = find it on the local network |
+| `CAMERA_MAC` | optional, speeds up the search |
 | `CAMERA_USER`, `CAMERA_PASSWORD`, `CAMERA_FINGERPRINT` | Access Authentication (SSH tunnel) |
 | `HTTP_ADDR` | listen address, default `:8765` |
 | `DATA_DIR` | settings and plugin state, default `data` |
@@ -40,6 +41,7 @@ CAMERA_HOST=192.168.1.50 go run ./cmd/alpha2web
 
 ## Limits
 
+- Auto-discovery only searches the local layer-2 network (ARP, SSDP, port scan of the /24). Across routers set the address. With Access Authentication on it scans for the camera's SSH port.
 - The camera does not announce new shots to the host, so plugins poll (Immich: every 2 minutes).
 - Only one live-view stream at a time.
 - Thumbnails are HEIF for HEIF shots, which not every browser shows.
