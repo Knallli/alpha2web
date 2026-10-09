@@ -26,6 +26,7 @@ type Handler struct {
 	Camera   *camera.Supervisor
 	Logs     *logbuf.Ring
 	Password string // optional HTTP basic auth password
+	Logger   *slog.Logger
 }
 
 type page struct {
@@ -82,6 +83,7 @@ func (h *Handler) mux() *http.ServeMux {
 		}
 	})
 	h.controlRoutes(m)
+	h.filesRoutes(m)
 	m.Handle("GET /static/", http.FileServerFS(assets))
 	return m
 }
@@ -102,3 +104,11 @@ func (h *Handler) render(w http.ResponseWriter, name string, data any) {
 }
 
 func writeJSON(w http.ResponseWriter, v any) { json.NewEncoder(w).Encode(v) }
+
+// Log returns the handler logger.
+func (h *Handler) Log() *slog.Logger {
+	if h.Logger != nil {
+		return h.Logger
+	}
+	return slog.Default()
+}

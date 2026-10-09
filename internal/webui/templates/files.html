@@ -1,0 +1,11 @@
+{{template "header" .}}
+{{if .Msg}}<div class="msg ok">Done: {{.Msg}}</div>{{end}}{{if .Err}}<div class="msg bad">{{.Err}}</div>{{end}}
+<section class="card"><h2>Card slot {{.Slot}}</h2>
+<p><a href="/files?slot=1">Slot 1</a> · <a href="/files?slot=2">Slot 2</a></p>
+<div class="scroll"><table><tr><th></th><th>Taken</th><th>Files</th><th></th></tr>
+{{range .Items}}{{$c := .}}<tr><td>{{if .Files}}<img loading="lazy" width="80" src="/files/thumb?slot={{$.Slot}}&id={{.ID}}&file={{(index .Files 0).ID}}" alt="">{{end}}</td>
+<td>{{.CreatedUTC.Format "2006-01-02 15:04:05"}} UTC</td>
+<td>{{range .Files}}<a href="/files/get?slot={{$.Slot}}&id={{$c.ID}}&file={{.ID}}&size={{.Size}}&path={{.Path}}">{{.Path}}</a> <span class="muted">{{.Size}} B</span><br>{{end}}</td>
+<td><form method="post" action="/actions/delete" onsubmit="return confirm('Delete from the card? This cannot be undone.')"><input type="hidden" name="slot" value="{{$.Slot}}"><input type="hidden" name="id" value="{{.ID}}"><button class="secondary">Delete</button></form></td></tr>
+{{else}}<tr><td colspan="4" class="muted">No files.</td></tr>{{end}}</table></div></section>
+{{template "footer" .}}
