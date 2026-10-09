@@ -16,7 +16,7 @@
 <aside class="lb-panel"><button type="button" class="secondary" id="lb-close">Close</button>
 <dl><dt>UTC</dt><dd id="lb-utc"></dd><dt>Local</dt><dd id="lb-local"></dd></dl>
 <ul id="lb-files"></ul>
-<form method="post" action="/actions/delete" data-confirm="Delete from the card? This cannot be undone."><input type="hidden" name="slot" value="{{.Slot}}"><input type="hidden" name="id" id="lb-del-id"><input type="hidden" name="back" value="gallery"><button class="secondary">Delete</button></form>
+<form method="post" action="/actions/delete" data-confirm="Delete from the card? This cannot be undone."><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="slot" value="{{.Slot}}"><input type="hidden" name="id" id="lb-del-id"><input type="hidden" name="back" value="gallery"><button class="secondary">Delete</button></form>
 </aside></div>
 <script src="/static/gallery.js" defer></script>
 {{template "footer" .}}

@@ -48,6 +48,31 @@ func TestReconnect(t *testing.T) {
 	srv.DropConnections()
 	wait(false)
 	wait(true)
+	if s.Sessions() < 2 || s.Restarts() < 1 {
+		t.Fatalf("sessions %d restarts %d", s.Sessions(), s.Restarts())
+	}
+}
+
+func TestFailureCounter(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := l.Addr().String()
+	l.Close() // nobody listens here now
+	s := New(Config{Host: addr, MAC: "aa:bb:cc:dd:ee:ff"}, backoff.Policy{Base: 10 * time.Millisecond, Max: 20 * time.Millisecond}, slog.Default())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.Run(ctx)
+	for i := 0; s.Failures() < 2; i++ {
+		if i > 200 {
+			t.Fatal("no failures counted")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if s.Sessions() != 0 || s.MAC() != "aa:bb:cc:dd:ee:ff" {
+		t.Fatal(s.Sessions(), s.MAC())
+	}
 }
 
 func TestSubscribe(t *testing.T) {

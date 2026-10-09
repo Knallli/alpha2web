@@ -120,7 +120,7 @@ func (h *Handler) galleryPage(w http.ResponseWriter, r *http.Request) {
 		Items            []galleryItem
 		Page, Prev, Next int
 		Total            int
-	}{page: page{"Gallery", "gallery", h.Version}, Slot: slotParam(r), Msg: r.URL.Query().Get("done")}
+	}{page: h.pg("Gallery", "gallery"), Slot: slotParam(r), Msg: r.URL.Query().Get("done")}
 	c, err := h.Camera.Client()
 	var all []ptpip.SonyContent
 	if err == nil {

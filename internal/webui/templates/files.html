@@ -6,6 +6,6 @@
 {{range .Items}}{{$c := .}}<tr><td>{{if .Files}}<img loading="lazy" width="80" src="/files/thumb?slot={{$.Slot}}&id={{.ID}}&file={{(index .Files 0).ID}}" alt="">{{end}}</td>
 <td>{{.CreatedUTC.Format "2006-01-02 15:04:05"}} UTC</td>
 <td>{{range .Files}}<a href="/files/get?slot={{$.Slot}}&id={{$c.ID}}&file={{.ID}}&size={{.Size}}&path={{.Path}}">{{.Path}}</a> <span class="muted">{{.Size}} B</span><br>{{end}}</td>
-<td><form method="post" action="/actions/delete" data-confirm="Delete from the card? This cannot be undone."><input type="hidden" name="slot" value="{{$.Slot}}"><input type="hidden" name="id" value="{{.ID}}"><button class="secondary">Delete</button></form></td></tr>
+<td><form method="post" action="/actions/delete" data-confirm="Delete from the card? This cannot be undone."><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="slot" value="{{$.Slot}}"><input type="hidden" name="id" value="{{.ID}}"><button class="secondary">Delete</button></form></td></tr>
 {{else}}<tr><td colspan="4" class="muted">No files.</td></tr>{{end}}</table></div></section>
 {{template "footer" .}}

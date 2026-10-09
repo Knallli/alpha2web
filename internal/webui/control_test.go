@@ -40,24 +40,27 @@ func TestControl(t *testing.T) {
 		t.Fatalf("%d %s", w.Code, w.Body.String())
 	}
 
-	post := func(path string, v url.Values, site string) int {
+	post := func(path string, v url.Values, token string) int {
+		if v == nil {
+			v = url.Values{}
+		}
+		v.Set("csrf", token)
 		r := httptest.NewRequest("POST", path, strings.NewReader(v.Encode()))
 		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		r.Header.Set("Sec-Fetch-Site", site)
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		return w.Code
 	}
-	if c := post("/actions/capture", url.Values{"af": {"1"}}, "same-origin"); c != http.StatusSeeOther {
+	if c := post("/actions/capture", url.Values{"af": {"1"}}, h.csrfToken()); c != http.StatusSeeOther {
 		t.Fatal("capture", c)
 	}
 	if len(srv.Controls()) == 0 {
 		t.Fatal("camera saw no control calls")
 	}
-	if c := post("/actions/capture", nil, "cross-site"); c != http.StatusForbidden {
-		t.Fatal("cross-site", c)
+	if c := post("/actions/capture", nil, "bad"); c != http.StatusBadRequest {
+		t.Fatal("bad token", c)
 	}
-	if c := post("/actions/setprop", url.Values{"code": {"1"}, "value": {"1"}}, "same-origin"); c != http.StatusBadGateway {
+	if c := post("/actions/setprop", url.Values{"code": {"1"}, "value": {"1"}}, h.csrfToken()); c != http.StatusBadGateway {
 		t.Fatal("unknown prop", c)
 	}
 }

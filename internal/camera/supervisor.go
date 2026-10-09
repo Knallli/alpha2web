@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/knallli/alpha2go/discovery"
@@ -55,6 +56,24 @@ type Supervisor struct {
 	subs   map[chan Event]struct{}
 	cancel context.CancelFunc // ends the current session
 	wake   chan struct{}      // interrupts the retry wait
+
+	sessions, failures, restarts atomic.Uint64
+}
+
+// Sessions counts successful connects.
+func (s *Supervisor) Sessions() uint64 { return s.sessions.Load() }
+
+// Failures counts attempts that ended without ever connecting.
+func (s *Supervisor) Failures() uint64 { return s.failures.Load() }
+
+// Restarts counts session endings that led to a new attempt.
+func (s *Supervisor) Restarts() uint64 { return s.restarts.Load() }
+
+// MAC returns the configured camera MAC address.
+func (s *Supervisor) MAC() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfg.MAC
 }
 
 // Event is what subscribers receive: session changes and raw camera events.
@@ -213,9 +232,14 @@ func (s *Supervisor) Client() (*ptpip.Client, error) {
 func (s *Supervisor) Run(ctx context.Context) {
 	fails := 0
 	for ctx.Err() == nil {
+		before := s.sessions.Load()
 		err := s.session(ctx)
 		if ctx.Err() != nil {
 			return
+		}
+		s.restarts.Add(1)
+		if s.sessions.Load() == before {
+			s.failures.Add(1)
 		}
 		fails++
 		s.log.Warn("camera session ended", "err", err)
@@ -274,6 +298,7 @@ func (s *Supervisor) session(parent context.Context) error {
 	s.client = c
 	s.st = Status{Connected: true, Model: di.Model, Serial: di.SerialNumber, Host: cfg.Host, Since: time.Now()}
 	s.mu.Unlock()
+	s.sessions.Add(1)
 	s.log.Info("camera connected", "model", di.Model)
 	up, down := true, false
 	s.publish(Event{Connected: &up})

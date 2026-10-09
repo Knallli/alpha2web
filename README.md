@@ -35,9 +35,15 @@ CAMERA_HOST=192.168.1.50 go run ./cmd/alpha2web
 | `CAMERA_HOST` | camera address; empty = find it on the local network |
 | `CAMERA_MAC` | optional, speeds up the search |
 | `CAMERA_USER`, `CAMERA_PASSWORD`, `CAMERA_FINGERPRINT` | Access Authentication (SSH tunnel) |
+| `CAMERA_WAKE_ON_LAN` | `true` sends Wake-on-LAN packets every 30 s while the camera is disconnected (needs a MAC) |
+| `CAMERA_WAKE_ON_LAN_ADDR` | target of those packets, default `255.255.255.255:9` |
+| `CAMERA_RECONNECT_INTERVAL` | first delay between connection attempts, default `5s` (backs off to 1 minute) |
+| `SHUTDOWN_TIMEOUT` | grace period for open requests on SIGTERM, default `20s` |
+| `LOG_LEVEL` | `debug`, `info` (default), `warn`, `error` |
+| `LOG_FORMAT` | `json` (default) or `text` |
 | `HTTP_ADDR` | listen address, default `:8765` |
 | `DATA_DIR` | settings and plugin state, default `data` |
-| `WEBUI_PASSWORD` | optional HTTP basic auth password for the whole UI (`/healthz` stays open) |
+| `WEBUI_PASSWORD` | optional HTTP basic auth password for the whole UI (`/healthz`, `/health` (JSON) and `/metrics` (Prometheus) stay open) |
 
 ## Limits
 
@@ -45,7 +51,7 @@ CAMERA_HOST=192.168.1.50 go run ./cmd/alpha2web
 - The camera does not announce new shots to the host, so plugins poll (Immich: every 2 minutes).
 - Only one live-view stream at a time.
 - Thumbnails are HEIF for HEIF shots, which not every browser shows.
-- No CSRF tokens: state-changing requests are refused when the browser marks them `cross-site`; set `WEBUI_PASSWORD` and do not expose the UI to the internet.
+- Forms carry a per-process CSRF token (it changes on restart); set `WEBUI_PASSWORD` and do not expose the UI to the internet.
 
 ## AI disclosure
 

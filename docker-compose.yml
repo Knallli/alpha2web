@@ -8,6 +8,9 @@
 #
 # Optional settings (camera address, password for the UI, ...) can go into a
 # .env file, see .env.example.
+#
+# Monitoring: /healthz (Docker HEALTHCHECK), /health (JSON) and /metrics
+# (Prometheus) need no password. Logs: LOG_LEVEL, LOG_FORMAT.
 services:
   alpha2web:
     image: ghcr.io/knallli/alpha2web:latest

@@ -22,7 +22,7 @@ func (h *Handler) controlPage(w http.ResponseWriter, r *http.Request) {
 		page
 		Msg, Err string
 		Props    []propRow
-	}{page: page{"Control", "control", h.Version}, Msg: r.URL.Query().Get("done")}
+	}{page: h.pg("Control", "control"), Msg: r.URL.Query().Get("done")}
 	c, err := h.Camera.Client()
 	if err == nil {
 		var ps []ptpip.SonyProp
@@ -53,10 +53,6 @@ func (h *Handler) controlPage(w http.ResponseWriter, r *http.Request) {
 // act runs fn against the live client and redirects back with the result.
 func (h *Handler) act(name string, fn func(r *http.Request, c *ptpip.Client) error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
-			http.Error(w, "cross-site request", http.StatusForbidden)
-			return
-		}
 		c, err := h.Camera.Client()
 		if err == nil {
 			err = fn(r, c)

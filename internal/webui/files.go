@@ -23,7 +23,7 @@ func (h *Handler) filesPage(w http.ResponseWriter, r *http.Request) {
 		Slot     uint32
 		Msg, Err string
 		Items    []ptpip.SonyContent
-	}{page: page{"Files", "files", h.Version}, Slot: slotParam(r), Msg: r.URL.Query().Get("done")}
+	}{page: h.pg("Files", "files"), Slot: slotParam(r), Msg: r.URL.Query().Get("done")}
 	c, err := h.Camera.Client()
 	if err == nil {
 		d.Items, err = c.SonyListAllContents(r.Context(), d.Slot)

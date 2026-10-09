@@ -52,14 +52,10 @@ func (h *Handler) settingsPage(w http.ResponseWriter, r *http.Request) {
 		Lock    map[string]bool
 		Msg     string
 		Plugins []pluginSection
-	}{page{"Settings", "settings", h.Version}, v, v.CameraPassword != "", lock, r.URL.Query().Get("done"), secs})
+	}{h.pg("Settings", "settings"), v, v.CameraPassword != "", lock, r.URL.Query().Get("done"), secs})
 }
 
 func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
-		http.Error(w, "cross-site request", http.StatusForbidden)
-		return
-	}
 	v := h.Settings.Store.Get()
 	set := func(field string, dst *string) {
 		if !h.Settings.Locked(field) {

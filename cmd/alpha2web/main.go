@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/knallli/alpha2go/ptpip"
+	"github.com/knallli/alpha2go/wol"
 	"github.com/knallli/alpha2web/internal/backoff"
 	"github.com/knallli/alpha2web/internal/camera"
 	"github.com/knallli/alpha2web/internal/logbuf"
@@ -70,12 +73,61 @@ func subcommand(arg string) {
 	os.Exit(0)
 }
 
+// newLogHandler builds the slog handler from LOG_LEVEL and LOG_FORMAT.
+func newLogHandler(w io.Writer, level, format string) slog.Handler {
+	var l slog.Level
+	if l.UnmarshalText([]byte(level)) != nil {
+		l = slog.LevelInfo
+	}
+	opts := &slog.HandlerOptions{Level: l}
+	if format == "text" {
+		return slog.NewTextHandler(w, opts)
+	}
+	return slog.NewJSONHandler(w, opts)
+}
+
+func envDuration(log *slog.Logger, k string, def time.Duration) time.Duration {
+	v := os.Getenv(k)
+	if v == "" {
+		return def
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		log.Warn("bad duration, using default", "var", k, "value", v, "default", def)
+		return def
+	}
+	return d
+}
+
+// wakeLoop runs run for the current MAC and restarts it when the MAC changes
+// (settings page); with no MAC nothing runs.
+func wakeLoop(ctx context.Context, mac func() string, poll time.Duration, run func(ctx context.Context, mac string)) {
+	for ctx.Err() == nil {
+		cur := mac()
+		rctx, cancel := context.WithCancel(ctx)
+		done := make(chan struct{})
+		if cur != "" {
+			go func() { defer close(done); run(rctx, cur) }()
+		} else {
+			close(done)
+		}
+		for ctx.Err() == nil && mac() == cur {
+			select {
+			case <-ctx.Done():
+			case <-time.After(poll):
+			}
+		}
+		cancel()
+		<-done
+	}
+}
+
 func main() {
 	if len(os.Args) > 1 {
 		subcommand(os.Args[1])
 	}
 	ring := logbuf.NewRing(500)
-	log := slog.New(logbuf.NewHandler(slog.NewTextHandler(os.Stderr, nil), ring))
+	log := slog.New(logbuf.NewHandler(newLogHandler(os.Stderr, env("LOG_LEVEL", "info"), env("LOG_FORMAT", "json")), ring))
 	slog.SetDefault(log)
 
 	dataDir := env("DATA_DIR", "data")
@@ -84,11 +136,17 @@ func main() {
 		log.Error("settings", "err", err)
 		os.Exit(1)
 	}
-	sup := camera.New(effective(store.Get(), dataDir), backoff.Policy{Base: 5 * time.Second, Max: time.Minute, Jitter: 0.2}, log)
+	sup := camera.New(effective(store.Get(), dataDir), backoff.Policy{Base: envDuration(log, "CAMERA_RECONNECT_INTERVAL", 5*time.Second), Max: time.Minute, Jitter: 0.2}, log)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go sup.Run(ctx)
+	if env("CAMERA_WAKE_ON_LAN", "") == "true" {
+		addr := env("CAMERA_WAKE_ON_LAN_ADDR", "255.255.255.255:9")
+		go wakeLoop(ctx, sup.MAC, 5*time.Second, func(c context.Context, mac string) {
+			wol.Loop(c, mac, addr, 30*time.Second, func() bool { return sup.Status().Connected }, log)
+		})
+	}
 	go plugin.RunAll(ctx, plugin.Env{Camera: sup, Log: log, DataDir: dataDir},
 		func(name string) map[string]string { return store.Get().Plugins[name] })
 
@@ -96,10 +154,20 @@ func main() {
 		Version: version, Camera: sup, Logs: ring, Logger: log, Password: os.Getenv("WEBUI_PASSWORD"), CacheDir: filepath.Join(dataDir, "cache"),
 		Settings: &webui.Settings{Store: store, Locked: locked, Apply: func(v settings.Values) { sup.SetConfig(effective(v, dataDir)) }},
 	}}
-	go func() { <-ctx.Done(); srv.Close() }()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		<-ctx.Done()
+		sctx, cancel := context.WithTimeout(context.Background(), envDuration(log, "SHUTDOWN_TIMEOUT", 20*time.Second))
+		defer cancel()
+		if err := srv.Shutdown(sctx); err != nil {
+			srv.Close() // long-lived streams (live view) outlast the grace period
+		}
+	}()
 	log.Info("listening", "addr", srv.Addr)
-	if err := srv.ListenAndServe(); err != nil && ctx.Err() == nil {
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Error("server", "err", err)
 		os.Exit(1)
 	}
+	<-done
 }

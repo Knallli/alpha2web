@@ -77,3 +77,4 @@ code{background:var(--code);padding:1px 5px;border-radius:4px}
 .lb-panel{width:280px;padding:14px;overflow:auto;background:var(--card);color:var(--fg)}
 .lb-panel ul{padding-left:18px;overflow-wrap:anywhere}
 @media(max-width:700px){.lightbox{flex-direction:column}.lb-panel{width:auto;max-height:40vh}}
+.live{width:100%;border-radius:8px;background:var(--code);min-height:200px}

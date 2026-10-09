@@ -1,6 +1,6 @@
 {{template "header" .}}
 {{if .Msg}}<div class="msg ok">Saved. The camera connection restarts with the new values.</div>{{end}}
-<form method="post" action="/settings">
+<form method="post" action="/settings"><input type="hidden" name="csrf" value="{{.CSRF}}">
 <section class="card"><h2>Camera</h2>
 <label for="host">Camera address</label><input id="host" name="host" value="{{.V.CameraHost}}" placeholder="empty = find the camera automatically"{{if .Lock.host}} disabled{{end}}>
 <label for="mac">Camera MAC address (optional, speeds up the search)</label><input id="mac" name="mac" value="{{.V.CameraMAC}}"{{if .Lock.mac}} disabled{{end}}>
