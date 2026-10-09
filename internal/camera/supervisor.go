@@ -42,6 +42,8 @@ type Supervisor struct {
 	client *ptpip.Client
 	st     Status
 	subs   map[chan Event]struct{}
+	cancel context.CancelFunc // ends the current session
+	wake   chan struct{}      // interrupts the retry wait
 }
 
 // Event is what subscribers receive: session changes and raw camera events.
@@ -79,7 +81,24 @@ func (s *Supervisor) publish(e Event) {
 }
 
 func New(cfg Config, restart backoff.Policy, log *slog.Logger) *Supervisor {
-	return &Supervisor{cfg: cfg, restart: restart, log: log, st: Status{Host: cfg.Host}}
+	return &Supervisor{cfg: cfg, restart: restart, log: log, st: Status{Host: cfg.Host}, wake: make(chan struct{}, 1)}
+}
+
+// SetConfig switches to a new camera address; a running session is dropped
+// and the supervisor reconnects at once.
+func (s *Supervisor) SetConfig(cfg Config) {
+	s.mu.Lock()
+	s.cfg = cfg
+	s.st.Host = cfg.Host
+	cancel := s.cancel
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
 }
 
 // Status returns the current state.
@@ -115,19 +134,30 @@ func (s *Supervisor) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-s.wake:
+			fails = 0
 		case <-time.After(s.restart.Delay(fails)):
 		}
 	}
 }
 
-func (s *Supervisor) session(ctx context.Context) error {
+func (s *Supervisor) session(parent context.Context) error {
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+	s.mu.Lock()
+	cfg := s.cfg
+	s.cancel = cancel
+	s.mu.Unlock()
+	if cfg.Host == "" {
+		return errors.New("no camera address set")
+	}
 	opts := ptpip.Options{Name: "alpha2web"}
-	if s.cfg.SSH != nil {
-		d := ptpip.NewSSHDialer(*s.cfg.SSH)
+	if cfg.SSH != nil {
+		d := ptpip.NewSSHDialer(*cfg.SSH)
 		defer d.Close()
 		opts.DialContext = d.DialContext
 	}
-	c, err := ptpip.Dial(ctx, s.cfg.Host, opts)
+	c, err := ptpip.Dial(ctx, cfg.Host, opts)
 	if err != nil {
 		return err
 	}
@@ -146,7 +176,7 @@ func (s *Supervisor) session(ctx context.Context) error {
 	}
 	s.mu.Lock()
 	s.client = c
-	s.st = Status{Connected: true, Model: di.Model, Serial: di.SerialNumber, Host: s.cfg.Host, Since: time.Now()}
+	s.st = Status{Connected: true, Model: di.Model, Serial: di.SerialNumber, Host: cfg.Host, Since: time.Now()}
 	s.mu.Unlock()
 	s.log.Info("camera connected", "model", di.Model)
 	up, down := true, false
@@ -162,6 +192,9 @@ func (s *Supervisor) session(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			if parent.Err() == nil {
+				return errors.New("camera settings changed")
+			}
 			return ctx.Err()
 		case <-c.Done():
 			return c.Err()

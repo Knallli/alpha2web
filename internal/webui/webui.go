@@ -27,6 +27,7 @@ type Handler struct {
 	Logs     *logbuf.Ring
 	Password string // optional HTTP basic auth password
 	Logger   *slog.Logger
+	Settings *Settings // nil hides the settings page
 }
 
 type page struct {
@@ -82,6 +83,10 @@ func (h *Handler) mux() *http.ServeMux {
 			http.Error(w, "camera not connected", http.StatusServiceUnavailable)
 		}
 	})
+	if h.Settings != nil {
+		m.HandleFunc("GET /settings", h.settingsPage)
+		m.HandleFunc("POST /settings", h.saveSettings)
+	}
 	h.controlRoutes(m)
 	h.filesRoutes(m)
 	m.Handle("GET /static/", http.FileServerFS(assets))

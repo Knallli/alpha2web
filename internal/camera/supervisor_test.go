@@ -72,3 +72,27 @@ func TestSubscribe(t *testing.T) {
 		t.Fatalf("want ptp event, got %+v", e)
 	}
 }
+
+func TestSetConfig(t *testing.T) {
+	a, _ := ptpiptest.Start(ptpiptest.Options{Dir: t.TempDir(), A6700: true})
+	b, _ := ptpiptest.Start(ptpiptest.Options{Dir: t.TempDir(), A6700: true, Model: "ILCE-7M4"})
+	defer a.Close()
+	defer b.Close()
+	s := New(Config{}, backoff.Policy{Base: time.Hour, Max: time.Hour}, slog.Default())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.Run(ctx)
+	for _, c := range []struct{ addr, model string }{{a.Addr(), "ILCE-6700"}, {b.Addr(), "ILCE-7M4"}} {
+		time.Sleep(50 * time.Millisecond)
+		s.SetConfig(Config{Host: c.addr})
+		ok := false
+		for i := 0; i < 100 && !ok; i++ {
+			st := s.Status()
+			ok = st.Connected && st.Model == c.model
+			time.Sleep(20 * time.Millisecond)
+		}
+		if !ok {
+			t.Fatalf("never connected to %s: %+v", c.model, s.Status())
+		}
+	}
+}
