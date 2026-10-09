@@ -81,6 +81,7 @@ func (h *Handler) mux() *http.ServeMux {
 			http.Error(w, "camera not connected", http.StatusServiceUnavailable)
 		}
 	})
+	h.controlRoutes(m)
 	m.Handle("GET /static/", http.FileServerFS(assets))
 	return m
 }
