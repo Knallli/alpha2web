@@ -468,7 +468,18 @@ func (s *Supervisor) session(parent context.Context) error {
 	if c == nil {
 		return err
 	}
-	defer c.Close()
+	defer func() {
+		// End the PTP session properly when we can: a camera that only sees the
+		// TCP connection vanish stays unresponsive for a while.
+		select {
+		case <-c.Done():
+		default:
+			cctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			c.CloseSession(cctx)
+			cancel()
+		}
+		c.Close()
+	}()
 	if cfg.DataDir != "" {
 		os.WriteFile(filepath.Join(cfg.DataDir, "camera-host"), []byte(cfg.Host), 0o600)
 	}
