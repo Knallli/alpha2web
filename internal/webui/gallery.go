@@ -12,13 +12,15 @@ import (
 	"time"
 
 	"github.com/knallli/alpha2go/ptpip"
+	"github.com/knallli/alpha2web/internal/heicconv"
 	"github.com/knallli/alpha2web/internal/thumbcache"
 )
 
 const (
 	galleryPageSize = 48
 	listingTTL      = 30 * time.Second
-	maxFetches      = 2 // the ptpip client serializes transactions; leave room for live view and control
+	maxFetches      = 2    // the ptpip client serializes transactions; leave room for live view and control
+	previewEdge     = 2400 // long edge of HEIF previews converted to JPEG
 )
 
 type gallery struct {
@@ -121,7 +123,7 @@ func (h *Handler) galleryPage(w http.ResponseWriter, r *http.Request) {
 		Page, Prev, Next int
 		Total            int
 	}{page: h.pg("Gallery", "gallery"), Slot: slotParam(r), Msg: r.URL.Query().Get("done")}
-	c, err := h.Camera.Client()
+	c, err := h.client(r)
 	var all []ptpip.SonyContent
 	if err == nil {
 		all, err = h.galleryState().list(r.Context(), c, d.Slot)
@@ -160,7 +162,7 @@ func sniff(b []byte) string {
 // galleryImage serves a thumbnail or preview from the disk cache, fetching from the camera on a miss.
 func (h *Handler) galleryImage(preview bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		c, err := h.Camera.Client()
+		c, err := h.client(r)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
@@ -201,30 +203,45 @@ func (h *Handler) galleryImage(preview bool) http.HandlerFunc {
 			}
 		}
 		key := thumbcache.Key(slot, f.Path, f.Size, ct.CreatedUTC, kind)
-		data, ok := g.cache.Get(key)
+		// converted JPEGs live under their own kind so a hit needs neither the camera nor the decoder
+		jkey := thumbcache.Key(slot, f.Path, f.Size, ct.CreatedUTC, kind+"-jpg")
+		data, ok := g.cache.Get(jkey)
 		if !ok {
-			select {
-			case g.sem <- struct{}{}:
-				defer func() { <-g.sem }()
-			case <-r.Context().Done():
-				return
-			}
-			var buf bytes.Buffer
-			if full {
-				_, err = c.SonyDownloadContentFile(r.Context(), slot, ct.ID, f.ID, f.Size, &buf, nil)
-			} else {
-				_, err = c.SonyGetContentsCompressed(r.Context(), slot, ct.ID, f.ID, typ, &buf)
-			}
-			if err != nil || buf.Len() == 0 {
-				if err != nil {
-					h.Log().Warn("gallery image", "kind", kind, "err", err)
+			store := false
+			if data, ok = g.cache.Get(key); !ok {
+				select {
+				case g.sem <- struct{}{}:
+					defer func() { <-g.sem }()
+				case <-r.Context().Done():
+					return
 				}
-				http.NotFound(w, r)
-				return
+				var buf bytes.Buffer
+				if full {
+					_, err = c.SonyDownloadContentFile(r.Context(), slot, ct.ID, f.ID, f.Size, &buf, nil)
+				} else {
+					_, err = c.SonyGetContentsCompressed(r.Context(), slot, ct.ID, f.ID, typ, &buf)
+				}
+				if err != nil || buf.Len() == 0 {
+					if err != nil {
+						h.Log().Warn("gallery image", "kind", kind, "err", err)
+					}
+					http.NotFound(w, r)
+					return
+				}
+				data, store = buf.Bytes(), true
 			}
-			data = buf.Bytes()
-			if err := g.cache.Put(key, data); err != nil {
-				h.Log().Warn("thumb cache", "err", err)
+			pkey := key
+			if sniff(data) == "image/heic" {
+				if jpg, err := heicconv.ToJPEG(data, previewEdge); err != nil {
+					h.warnOnce("heic conversion failed, serving original", err)
+				} else {
+					data, pkey, store = jpg, jkey, true
+				}
+			}
+			if store {
+				if err := g.cache.Put(pkey, data); err != nil {
+					h.Log().Warn("thumb cache", "err", err)
+				}
 			}
 		}
 		w.Header().Set("Content-Type", sniff(data))
@@ -232,6 +249,15 @@ func (h *Handler) galleryImage(preview bool) http.HandlerFunc {
 		w.Header().Set("Cache-Control", "private, max-age=86400")
 		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 		w.Write(data)
+	}
+}
+
+var warned sync.Map
+
+// warnOnce logs each distinct error text once per process.
+func (h *Handler) warnOnce(msg string, err error) {
+	if _, dup := warned.LoadOrStore(err.Error(), true); !dup {
+		h.Log().Warn(msg, "err", err)
 	}
 }
 

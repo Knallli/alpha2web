@@ -42,11 +42,19 @@ func locked(field string) bool { return os.Getenv(envFor[field]) != "" }
 // effective merges the saved settings with the environment (environment wins).
 func effective(v settings.Values, dataDir string) camera.Config {
 	pick := func(field, saved string) string { return env(envFor[field], saved) }
-	cfg := camera.Config{Host: pick("host", v.CameraHost), MAC: pick("mac", v.CameraMAC), DataDir: dataDir}
+	cfg := camera.Config{Host: pick("host", v.CameraHost), MAC: pick("mac", v.CameraMAC), DataDir: dataDir, Keepalive: keepalive(os.Getenv("CAMERA_KEEPALIVE"))}
 	if user := pick("user", v.CameraUser); user != "" {
 		cfg.SSH = &ptpip.SSHConfig{User: user, Password: pick("password", v.CameraPassword), Fingerprint: pick("fingerprint", v.CameraFingerprint)}
 	}
 	return cfg
+}
+
+// keepalive parses CAMERA_KEEPALIVE: default 10s, "0" disables it.
+func keepalive(v string) time.Duration {
+	if d, err := time.ParseDuration(v); err == nil && d >= 0 {
+		return d
+	}
+	return 10 * time.Second
 }
 
 // pluginConfig returns the stored settings of a plugin with its environment

@@ -38,6 +38,7 @@ CAMERA_HOST=192.168.1.50 go run ./cmd/alpha2web
 | `CAMERA_USER`, `CAMERA_PASSWORD`, `CAMERA_FINGERPRINT` | Access Authentication (SSH tunnel) |
 | `CAMERA_WAKE_ON_LAN` | `true` sends Wake-on-LAN packets every 30 s while the camera is disconnected (needs a MAC) |
 | `CAMERA_WAKE_ON_LAN_ADDR` | target of those packets, default `255.255.255.255:9` |
+| `CAMERA_KEEPALIVE` | interval of the idle property poll that keeps the session busy and the camera properties fresh, default `10s`, `0` disables |
 | `CAMERA_RECONNECT_INTERVAL` | first delay between connection attempts, default `5s` (backs off to 1 minute) |
 | `SHUTDOWN_TIMEOUT` | grace period for open requests on SIGTERM, default `20s` |
 | `LOG_LEVEL` | `debug`, `info` (default), `warn`, `error` |
@@ -55,7 +56,7 @@ CAMERA_HOST=192.168.1.50 go run ./cmd/alpha2web
 - Auto-discovery only searches the local layer-2 network (ARP, SSDP, port scan of the /24). Across routers set the address. With Access Authentication on it scans for the camera's SSH port.
 - The camera does not announce new shots to the host, so plugins poll (Immich: every 2 minutes).
 - Only one live-view stream at a time.
-- Thumbnails are HEIF for HEIF shots, which not every browser shows.
+- HEIF thumbnails and previews are converted to JPEG in pure Go (cached); if that fails the original is served and the browser may not show it.
 - Forms carry a per-process CSRF token (it changes on restart); set `WEBUI_PASSWORD` and do not expose the UI to the internet.
 
 ## AI disclosure

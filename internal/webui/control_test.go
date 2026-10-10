@@ -64,3 +64,13 @@ func TestControl(t *testing.T) {
 		t.Fatal("unknown prop", c)
 	}
 }
+
+func TestControlBannerWithoutCamera(t *testing.T) {
+	h := &Handler{Camera: camera.New(camera.Config{}, backoff.Default, slog.Default()), Logs: logbuf.NewRing(1)}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("GET", "/control", nil))
+	b := w.Body.String()
+	if w.Code != 200 || !strings.Contains(b, `msg wait`) || !strings.Contains(b, "The camera is not connected.") || strings.Contains(b, "msg bad") {
+		t.Fatalf("%d %s", w.Code, b)
+	}
+}

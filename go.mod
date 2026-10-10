@@ -1,9 +1,10 @@
 module github.com/knallli/alpha2web
 
-go 1.26.0
+go 1.26.4
 
 require (
-	github.com/knallli/alpha2go v0.1.0
+	github.com/gen2brain/h265 v0.2.3
+	github.com/knallli/alpha2go v0.1.1
 	modernc.org/sqlite v1.60.1
 )
 

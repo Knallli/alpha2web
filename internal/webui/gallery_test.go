@@ -1,9 +1,12 @@
 package webui
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"html"
+	"image"
+	"image/jpeg"
 	"log/slog"
 	"net/http/httptest"
 	"os"
@@ -13,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gen2brain/h265/heic"
 	"github.com/knallli/alpha2go/ptpip/ptpiptest"
 	"github.com/knallli/alpha2web/internal/backoff"
 	"github.com/knallli/alpha2web/internal/camera"
@@ -146,5 +150,47 @@ func TestGalleryPaging(t *testing.T) {
 	}
 	if !strings.Contains(p1, "page=2") || strings.Contains(p2, "Older") {
 		t.Fatal("pager links wrong")
+	}
+}
+
+func heicFixture(t *testing.T) string {
+	t.Helper()
+	img := image.NewNRGBA(image.Rect(0, 0, 64, 48))
+	for i := range img.Pix {
+		img.Pix[i] = byte(i)
+	}
+	var buf bytes.Buffer
+	if err := heic.Encode(&buf, img, heic.EncodeOptions{Quality: 80}); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
+}
+
+// The fake camera cannot serve custom thumbnails, so a .JPG that really holds
+// HEIF bytes exercises the same fetch, convert and cache path via the file download.
+func TestGalleryHEICConverted(t *testing.T) {
+	h, srv := galleryFixture(t, map[string]string{"DSC00001.JPG": heicFixture(t)})
+	u := strings.Replace(thumbURLs(get(h, "/gallery").Body.String())[0], "/gallery/thumb", "/gallery/preview", 1)
+	w := get(h, u)
+	if w.Code != 200 || w.Header().Get("Content-Type") != "image/jpeg" {
+		t.Fatalf("%d %v", w.Code, w.Header())
+	}
+	cfg, err := jpeg.DecodeConfig(w.Body)
+	if err != nil || cfg.Width != 64 || cfg.Height != 48 {
+		t.Fatalf("%v %+v", err, cfg)
+	}
+	first, ops := w.Body.Len(), srv.Ops.Load()
+	if w2 := get(h, u); w2.Code != 200 || w2.Header().Get("Content-Type") != "image/jpeg" || srv.Ops.Load() != ops {
+		t.Fatalf("second request not served from cache: %d ops %d -> %d (%d)", w2.Code, ops, srv.Ops.Load(), first)
+	}
+}
+
+func TestGalleryHEICFallback(t *testing.T) {
+	bad := "\x00\x00\x00\x18ftypheic" + strings.Repeat("x", 40)
+	h, _ := galleryFixture(t, map[string]string{"DSC00001.JPG": bad})
+	u := strings.Replace(thumbURLs(get(h, "/gallery").Body.String())[0], "/gallery/thumb", "/gallery/preview", 1)
+	w := get(h, u)
+	if w.Code != 200 || w.Body.String() != bad || w.Header().Get("Content-Type") != "image/heic" {
+		t.Fatalf("%d %v %q", w.Code, w.Header(), w.Body.String())
 	}
 }

@@ -22,6 +22,7 @@ dt{color:var(--muted)} dd{margin:0;text-align:right;overflow-wrap:anywhere}
 dd a{white-space:normal;overflow-wrap:anywhere}
 .muted{color:var(--muted);font-size:.88rem}
 .bad{color:var(--bad)} .ok{color:var(--ok)}
+.msg.wait{border-color:var(--wait)}
 .msg{padding:10px 12px;border-radius:8px;margin-bottom:12px;border:1px solid var(--line);background:var(--card)}
 .scroll{overflow-x:auto}
 table{border-collapse:collapse;width:100%;font-size:.9rem}

@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"errors"
 	"net/http"
 	"path"
 	"slices"
@@ -8,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/knallli/alpha2go/ptpip"
+	"github.com/knallli/alpha2web/internal/camera"
 )
 
 func slotParam(r *http.Request) uint32 {
@@ -25,21 +27,21 @@ func (h *Handler) filesPage(w http.ResponseWriter, r *http.Request) {
 		Items    []ptpip.SonyContent
 		Tracked  []trackedFiles
 	}{page: h.pg("Files", "files"), Slot: slotParam(r), Msg: r.URL.Query().Get("done"), Tracked: tracked(r.Context(), r)}
-	c, err := h.Camera.Client()
+	c, err := h.client(r)
 	if err == nil {
 		d.Items, err = c.SonyListAllContents(r.Context(), d.Slot)
 		slices.SortFunc(d.Items, func(a, b ptpip.SonyContent) int { return b.CreatedUTC.Compare(a.CreatedUTC) })
 	}
-	if err != nil {
-		d.Err = err.Error()
+	if err != nil && !errors.Is(err, camera.ErrNotConnected) { // the banner says that
+		d.Err = camera.Explain(err)
 	}
 	h.render(w, "files.html", d)
 }
 
 func (h *Handler) fileThumb(w http.ResponseWriter, r *http.Request) {
-	c, err := h.Camera.Client()
+	c, err := h.client(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		http.Error(w, camera.Explain(err), http.StatusServiceUnavailable)
 		return
 	}
 	id, _ := strconv.ParseUint(r.FormValue("id"), 10, 32)
@@ -51,9 +53,9 @@ func (h *Handler) fileThumb(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) fileGet(w http.ResponseWriter, r *http.Request) {
-	c, err := h.Camera.Client()
+	c, err := h.client(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		http.Error(w, camera.Explain(err), http.StatusServiceUnavailable)
 		return
 	}
 	id, _ := strconv.ParseUint(r.FormValue("id"), 10, 32)

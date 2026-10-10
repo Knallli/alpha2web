@@ -1,5 +1,7 @@
 {{template "header" .}}
 <section class="card"><h2>Live view</h2>
-<img src="/liveview.mjpeg" alt="Live view" class="live">
+<img id="live" src="/liveview.mjpeg" alt="Live view" class="live">
+<p id="live-status" class="muted" role="status">Connecting…</p>
 <p class="muted">Only one live-view stream is possible at a time.</p></section>
+<script src="/static/liveview.js" defer></script>
 {{template "footer" .}}

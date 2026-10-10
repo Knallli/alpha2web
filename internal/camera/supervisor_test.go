@@ -2,7 +2,9 @@ package camera
 
 import (
 	"context"
-	"github.com/knallli/alpha2go/discovery"
+	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/netip"
@@ -13,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/knallli/alpha2go/discovery"
+	"github.com/knallli/alpha2go/ptpip"
 	"github.com/knallli/alpha2go/ptpip/ptpiptest"
 	"github.com/knallli/alpha2web/internal/backoff"
 )
@@ -156,5 +160,151 @@ func TestDiscovery(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(filepath.Join(dir, "ptpip-guid")); len(b) != 16 {
 		t.Fatal("guid not persisted")
+	}
+}
+
+func startSup(t *testing.T, cfg Config, p backoff.Policy) (*Supervisor, *ptpiptest.Server) {
+	t.Helper()
+	srv, err := ptpiptest.Start(ptpiptest.Options{Dir: t.TempDir(), A6700: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	cfg.Host = srv.Addr()
+	s := New(cfg, p, slog.Default())
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go s.Run(ctx)
+	return s, srv
+}
+
+func until(t *testing.T, what string, ok func() bool) {
+	t.Helper()
+	for i := 0; i < 250; i++ {
+		if ok() {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("timeout waiting for " + what)
+}
+
+func TestQuickReconnect(t *testing.T) {
+	// A long backoff proves the retry after an established session does not wait for it.
+	s, srv := startSup(t, Config{}, backoff.Policy{Base: time.Hour, Max: time.Hour})
+	until(t, "connect", func() bool { return s.Status().Connected })
+	time.Sleep(minQuick + 100*time.Millisecond)
+	t0 := time.Now()
+	srv.DropConnections()
+	until(t, "drop", func() bool { return s.Sessions() >= 1 && s.Restarts() >= 1 })
+	until(t, "reconnect", func() bool { return s.Sessions() >= 2 && s.Status().Connected })
+	if d := time.Since(t0); d > 2*time.Second {
+		t.Fatalf("reconnect took %v", d)
+	}
+	st := s.Status()
+	if st.Drops != 1 || st.LastDropAt.IsZero() || st.Reconnecting || !strings.Contains(st.LastDropReason, "closed the connection") {
+		t.Fatalf("%+v", st)
+	}
+}
+
+func TestReconnectingFlag(t *testing.T) {
+	s, srv := startSup(t, Config{}, backoff.Policy{Base: time.Hour, Max: time.Hour})
+	if s.Status().Reconnecting {
+		t.Fatal("reconnecting before the first connect")
+	}
+	until(t, "connect", func() bool { return s.Status().Connected })
+	srv.Close() // nobody answers anymore
+	until(t, "reconnecting", func() bool { st := s.Status(); return !st.Connected && st.Reconnecting && st.Drops == 1 })
+}
+
+func TestExplain(t *testing.T) {
+	closed := "The camera closed the connection (it does not keep the tunnel open permanently)."
+	for _, c := range []struct {
+		err  error
+		want string
+	}{
+		{fmt.Errorf("ptpip: event channel: %w", io.EOF), closed},
+		{errors.New("read tcp 1.2.3.4:5: read: connection reset by peer"), closed},
+		{io.ErrUnexpectedEOF, closed},
+		{ErrNotConnected, "The camera is not connected."},
+		{context.DeadlineExceeded, "The camera stopped answering."},
+		{errors.New("something else"), "something else"},
+	} {
+		if got := Explain(c.err); got != c.want {
+			t.Errorf("%v: %q", c.err, got)
+		}
+	}
+}
+
+func TestWaitClient(t *testing.T) {
+	srv, err := ptpiptest.Start(ptpiptest.Options{Dir: t.TempDir(), A6700: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	s := New(Config{Host: srv.Addr()}, backoff.Default, slog.Default())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	t0 := time.Now()
+	if _, err := s.WaitClient(ctx, 100*time.Millisecond); !errors.Is(err, ErrNotConnected) || time.Since(t0) < 90*time.Millisecond {
+		t.Fatalf("want a timeout, got %v after %v", err, time.Since(t0))
+	}
+	go func() { time.Sleep(150 * time.Millisecond); s.Run(ctx) }()
+	c, err := s.WaitClient(ctx, 5*time.Second)
+	if err != nil || c == nil {
+		t.Fatal(c, err)
+	}
+	if c2, err := s.WaitClient(ctx, 0); err != nil || c2 != c {
+		t.Fatal("connected client must be returned at once")
+	}
+}
+
+func TestKeepalive(t *testing.T) {
+	s, srv := startSup(t, Config{Keepalive: 30 * time.Millisecond}, backoff.Policy{Base: 20 * time.Millisecond, Max: 50 * time.Millisecond})
+	until(t, "connect", func() bool { return s.Status().Connected })
+	n := srv.Ops.Load()
+	until(t, "idle polls", func() bool { return srv.Ops.Load() >= n+3 })
+	// A broken connection ends the session; the keepalive must not hold on to it.
+	srv.DropConnections()
+	until(t, "second session", func() bool { return s.Sessions() >= 2 && s.Status().Connected })
+}
+
+func TestPropCache(t *testing.T) {
+	s, _ := startSup(t, Config{}, backoff.Default) // no keepalive: only events refresh
+	until(t, "props", func() bool { ps, _ := s.Props(); return len(ps) >= 3 })
+	ps, v := s.Props()
+	cur := func(code uint16) int64 {
+		ps, _ := s.Props()
+		for _, p := range ps {
+			if p.Code == code {
+				return p.Current.Int
+			}
+		}
+		return -1
+	}
+	for i := 1; i < len(ps); i++ {
+		if ps[i-1].Code >= ps[i].Code {
+			t.Fatal("not sorted")
+		}
+	}
+	ch, stop := s.Subscribe()
+	defer stop()
+	c, _ := s.Client()
+	if err := c.SonySetProp(context.Background(), 0x500A, 4, ptpip.SonyValue{Int: 0x8002}); err != nil {
+		t.Fatal(err)
+	}
+	until(t, "refresh", func() bool { return cur(0x500A) == 0x8002 })
+	if _, v2 := s.Props(); v2 <= v {
+		t.Fatalf("version %d -> %d", v, v2)
+	}
+	for {
+		select {
+		case e := <-ch:
+			if e.Props {
+				return
+			}
+		case <-time.After(time.Second):
+			t.Fatal("no props event")
+		}
 	}
 }

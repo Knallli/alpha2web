@@ -10,13 +10,15 @@
 <p class="muted">{{.Percent}} % · {{bytes .Done}}{{if .Size}} of {{bytes .Size}}{{end}}{{if .BytesPerSec}} · {{bytes (int64 .BytesPerSec)}}/s{{end}}{{if .ETA}} · {{.ETA}} left{{end}} · running {{since .Started}}</p></section>{{end}}{{end}}{{end}}
 <div class="grid">
 <section class="card"><h2>Camera</h2>
-<p class="big">{{if .S.Connected}}<span class="dot ok"></span>Connected{{else}}<span class="dot wait"></span>Searching…{{end}}</p>
+<p class="big">{{if .S.Connected}}<span class="dot ok"></span>Connected{{else if .S.Reconnecting}}<span class="dot wait"></span>Reconnecting…{{else}}<span class="dot wait"></span>Searching…{{end}}</p>
 <dl><dt>Address</dt><dd>{{.S.Host}}</dd>
 {{if .S.Model}}<dt>Model</dt><dd>{{.S.Model}}</dd>{{end}}
 {{if .S.Serial}}<dt>Serial</dt><dd>{{.S.Serial}}</dd>{{end}}
-{{if .S.Connected}}<dt>Connected since</dt><dd>{{.S.Since.Format "15:04:05"}}</dd>{{end}}
+{{if .S.Connected}}<dt>Connected since</dt><dd>{{.S.Since.Format "15:04:05"}} ({{since .S.Since}})</dd>{{end}}
+{{if .S.Drops}}<dt>Dropped sessions</dt><dd>{{.S.Drops}}</dd><dt>Last drop</dt><dd>{{ago .S.LastDropAt}}</dd>{{end}}
 <dt>Restarts</dt><dd>{{.Restarts}}</dd></dl>
-{{if .S.LastError}}<p class="muted bad">{{.S.LastError}}</p>{{end}}
+{{if .S.LastDropReason}}<p class="muted">{{.S.LastDropReason}}</p>{{end}}
+{{if and .S.LastError (not .S.Connected)}}<p class="muted bad" title="{{.S.LastError}}">{{.S.LastError}}</p>{{end}}
 {{if not .S.Connected}}<p class="muted">Turn the camera on (Wi-Fi + PC Remote).</p>{{end}}</section>
 {{range .Plugins}}{{if or .Headline .Rows}}<section class="card"><h2>{{.Title}}</h2>
 {{if .Headline}}<p class="big">{{if .Level}}<span class="dot {{cls .Level}}"></span>{{end}}{{.Headline}}</p>{{end}}

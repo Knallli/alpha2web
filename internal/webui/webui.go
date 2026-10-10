@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/knallli/alpha2go/ptpip"
 	"github.com/knallli/alpha2web/internal/camera"
 	"github.com/knallli/alpha2web/internal/health"
 	"github.com/knallli/alpha2web/internal/logbuf"
@@ -43,13 +44,40 @@ type Handler struct {
 	csrf     string
 	galOnce  sync.Once
 	gal      gallery
+	live     liveState
 }
 
 type page struct {
 	Title, Nav, Version, CSRF string
+	Banner                    string // camera state, shown while the camera is away
 }
 
-func (h *Handler) pg(title, nav string) page { return page{title, nav, h.Version, h.csrfToken()} }
+func (h *Handler) pg(title, nav string) page {
+	return page{title, nav, h.Version, h.csrfToken(), h.banner()}
+}
+
+// banner describes a missing camera; it is empty while connected.
+func (h *Handler) banner() string {
+	st := h.Camera.Status()
+	switch {
+	case st.Connected:
+		return ""
+	case st.Reconnecting && st.LastDropReason != "":
+		return st.LastDropReason + " Reconnecting…"
+	case st.Reconnecting:
+		return "Camera connection lost. Reconnecting…"
+	}
+	return "The camera is not connected."
+}
+
+// client waits briefly for a reconnect so a short drop does not fail the
+// request; a camera that was never there fails at once.
+func (h *Handler) client(r *http.Request) (*ptpip.Client, error) {
+	if !h.Camera.Status().Reconnecting {
+		return h.Camera.Client()
+	}
+	return h.Camera.WaitClient(r.Context(), camera.DefaultWait)
+}
 
 // csrfToken is random per process; every POST form carries it.
 func (h *Handler) csrfToken() string {
@@ -94,6 +122,7 @@ func (h *Handler) mux() *http.ServeMux {
 		h.render(w, "liveview.html", h.pg("Live view", "liveview"))
 	})
 	m.HandleFunc("GET /liveview.mjpeg", h.liveStream)
+	m.HandleFunc("GET /liveview/status", h.liveStatus)
 	m.HandleFunc("GET /logs", func(w http.ResponseWriter, r *http.Request) {
 		name, l := levelParam(r)
 		h.render(w, "logs.html", struct {

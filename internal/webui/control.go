@@ -1,6 +1,8 @@
 package webui
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -8,6 +10,7 @@ import (
 	"strconv"
 
 	"github.com/knallli/alpha2go/ptpip"
+	"github.com/knallli/alpha2web/internal/camera"
 )
 
 type propRow struct {
@@ -23,11 +26,16 @@ func (h *Handler) controlPage(w http.ResponseWriter, r *http.Request) {
 		Msg, Err string
 		Props    []propRow
 	}{page: h.pg("Control", "control"), Msg: r.URL.Query().Get("done")}
-	c, err := h.Camera.Client()
+	c, err := h.client(r)
 	if err == nil {
-		var ps []ptpip.SonyProp
-		if ps, err = c.SonyGetProps(r.Context(), false); err == nil {
-			slices.SortFunc(ps, func(a, b ptpip.SonyProp) int { return int(a.Code) - int(b.Code) })
+		// the supervisor keeps this list fresh; fetch only before it has one
+		ps, _ := h.Camera.Props()
+		if len(ps) == 0 {
+			if ps, err = c.SonyGetProps(context.WithoutCancel(r.Context()), false); err == nil {
+				slices.SortFunc(ps, func(a, b ptpip.SonyProp) int { return int(a.Code) - int(b.Code) })
+			}
+		}
+		if err == nil {
 			for _, p := range ps {
 				row := propRow{Code: p.Code, Writable: p.Writable && p.Enabled == 1 && p.Type != 0xFFFF && p.Type&0x4000 == 0}
 				if p.Type == 0xFFFF {
@@ -44,8 +52,8 @@ func (h *Handler) controlPage(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if err != nil {
-		d.Err = err.Error()
+	if err != nil && !errors.Is(err, camera.ErrNotConnected) { // the banner says that
+		d.Err = camera.Explain(err)
 	}
 	h.render(w, "control.html", d)
 }
@@ -53,12 +61,17 @@ func (h *Handler) controlPage(w http.ResponseWriter, r *http.Request) {
 // act runs fn against the live client and redirects back with the result.
 func (h *Handler) act(name string, fn func(r *http.Request, c *ptpip.Client) error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		c, err := h.Camera.Client()
+		c, err := h.client(r)
 		if err == nil {
-			err = fn(r, c)
+			// a cancelled transaction would tear the whole camera session down
+			err = fn(r.WithContext(context.WithoutCancel(r.Context())), c)
 		}
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
+			code := http.StatusBadGateway
+			if errors.Is(err, camera.ErrNotConnected) {
+				code = http.StatusServiceUnavailable
+			}
+			http.Error(w, camera.Explain(err), code)
 			return
 		}
 		if r.FormValue("back") == "gallery" {

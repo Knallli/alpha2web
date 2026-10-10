@@ -83,3 +83,11 @@ func TestPluginConfigOverlay(t *testing.T) {
 		t.Fatal("unknown plugin")
 	}
 }
+
+func TestKeepalive(t *testing.T) {
+	for in, want := range map[string]time.Duration{"": 10 * time.Second, "0": 0, "3s": 3 * time.Second, "junk": 10 * time.Second, "-1s": 10 * time.Second} {
+		if got := keepalive(in); got != want {
+			t.Errorf("%q: %v", in, got)
+		}
+	}
+}
