@@ -34,6 +34,11 @@ const DefaultWait = 8 * time.Second
 // camera that drops us right after the handshake gets the normal backoff.
 const minQuick = time.Second
 
+// settle is the pause before an immediate retry: a camera that has just lost
+// a session needs a moment before it takes a new one (it answers slowly or
+// not at all otherwise).
+var settle = 2 * time.Second
+
 // Config says how to reach the camera. SSH is optional (Access Authentication).
 type Config struct {
 	Host    string // empty = find the camera on the local network
@@ -409,7 +414,13 @@ func (s *Supervisor) Run(ctx context.Context) {
 		}
 		s.mu.Unlock()
 		if was && time.Since(started) >= minQuick {
-			fails = 0 // a session that worked: try again at once, backoff only if that fails
+			fails = 0 // a session that worked: try again soon, backoff only if that fails
+			select {
+			case <-ctx.Done():
+				return
+			case <-s.wake:
+			case <-time.After(settle):
+			}
 			continue
 		}
 		fails++

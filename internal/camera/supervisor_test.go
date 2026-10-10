@@ -198,7 +198,7 @@ func TestQuickReconnect(t *testing.T) {
 	srv.DropConnections()
 	until(t, "drop", func() bool { return s.Sessions() >= 1 && s.Restarts() >= 1 })
 	until(t, "reconnect", func() bool { return s.Sessions() >= 2 && s.Status().Connected })
-	if d := time.Since(t0); d > 2*time.Second {
+	if d := time.Since(t0); d > 4*time.Second {
 		t.Fatalf("reconnect took %v", d)
 	}
 	st := s.Status()

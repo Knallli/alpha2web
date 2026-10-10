@@ -58,7 +58,8 @@ func (g *gallery) list(ctx context.Context, c *ptpip.Client, slot uint32) ([]ptp
 	if l, ok := g.lists[slot]; ok && time.Since(l.at) < listingTTL {
 		return l.items, nil
 	}
-	items, err := c.SonyListAllContents(ctx, slot)
+	// a cancelled transaction would break the camera session; the listing is cached for others anyway
+	items, err := c.SonyListAllContents(context.WithoutCancel(ctx), slot)
 	if err != nil {
 		return nil, err
 	}
@@ -159,6 +160,22 @@ func sniff(b []byte) string {
 	return "application/octet-stream"
 }
 
+// acquire takes one of the camera fetch slots. It gives up, without touching
+// the camera, when the browser went away while waiting.
+func (h *Handler) acquire(r *http.Request) (release func(), ok bool) {
+	g := h.galleryState()
+	select {
+	case g.sem <- struct{}{}:
+	case <-r.Context().Done():
+		return nil, false
+	}
+	if r.Context().Err() != nil {
+		<-g.sem
+		return nil, false
+	}
+	return func() { <-g.sem }, true
+}
+
 // galleryImage serves a thumbnail or preview from the disk cache, fetching from the camera on a miss.
 func (h *Handler) galleryImage(preview bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -209,17 +226,18 @@ func (h *Handler) galleryImage(preview bool) http.HandlerFunc {
 		if !ok {
 			store := false
 			if data, ok = g.cache.Get(key); !ok {
-				select {
-				case g.sem <- struct{}{}:
-					defer func() { <-g.sem }()
-				case <-r.Context().Done():
+				release, ok := h.acquire(r)
+				if !ok {
 					return
 				}
+				defer release()
+				// leaving the page must not cancel a running transaction: that breaks the camera session
+				dctx := context.WithoutCancel(r.Context())
 				var buf bytes.Buffer
 				if full {
-					_, err = c.SonyDownloadContentFile(r.Context(), slot, ct.ID, f.ID, f.Size, &buf, nil)
+					_, err = c.SonyDownloadContentFile(dctx, slot, ct.ID, f.ID, f.Size, &buf, nil)
 				} else {
-					_, err = c.SonyGetContentsCompressed(r.Context(), slot, ct.ID, f.ID, typ, &buf)
+					_, err = c.SonyGetContentsCompressed(dctx, slot, ct.ID, f.ID, typ, &buf)
 				}
 				if err != nil || buf.Len() == 0 {
 					if err != nil {

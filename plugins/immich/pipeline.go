@@ -336,11 +336,12 @@ func (p *pipeline) reconcile(ctx context.Context, cam *ptpip.Client, s settings)
 	for slot := uint32(1); slot <= 2; slot++ {
 		cs, err := cam.SonyListAllContents(ctx, slot)
 		if err != nil {
-			if ctx.Err() != nil || !p.env.Camera.Status().Connected {
+			// Only "no card in this slot" may be skipped. Any other failure (a
+			// timeout, a dropped session) must not look like an empty card.
+			if !ptpip.IsCode(err, 0x201D) && !ptpip.IsCode(err, 0x2013) {
 				return err
 			}
-			// An empty or missing card is reported as an error.
-			p.log.Debug("list slot failed", "slot", slot, "err", err)
+			p.log.Debug("slot has no card", "slot", slot, "err", err)
 			continue
 		}
 		for _, c := range cs {
