@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,33 +33,78 @@ func TestPluginUploads(t *testing.T) {
 	defer cancel()
 	go sup.Run(ctx)
 	data := t.TempDir()
-	cfg := map[string]string{"url": im.URL, "api_key": im.APIKey, "album": "Cam", "interval": "10s", "delete_after_upload": "true"}
+	staging := t.TempDir()
+	t.Setenv("STAGING_DIR", staging)
+	cfg := map[string]string{"url": im.URL, "api_key": im.APIKey, "album": "Cam", "delete_on_camera": "true"}
 	done := make(chan struct{})
 	go func() {
 		(&Plugin{}).Run(ctx, plugin.Env{Camera: sup, Log: slog.Default(), DataDir: data, Config: func() map[string]string { return cfg }})
 		close(done)
 	}()
-	for i := 0; len(im.Assets()) == 0; i++ {
-		if i > 300 {
-			t.Fatal("nothing uploaded")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	waitFor(t, "upload", func() bool { return len(im.Assets()) > 0 })
 	if a := im.Assets()[0]; a.Filename != "DSC00001.JPG" {
 		t.Fatalf("%+v", a)
 	}
-	if len(im.AlbumAssets("Cam")) != 1 {
-		t.Fatal("not in album")
-	}
-	for i := 0; len(cam.Deletes()) == 0; i++ {
-		if i > 100 {
-			t.Fatal("not deleted from card")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	waitFor(t, "album", func() bool { return len(im.AlbumAssets("Cam")) == 1 })
+	waitFor(t, "camera delete", func() bool { return len(cam.Deletes()) == 1 })
 	cancel()
 	<-done
-	if _, err := os.Stat(filepath.Join(data, "immich-uploaded.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(data, "immich.db")); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(staging, ".partial")); err != nil {
+		t.Fatal("STAGING_DIR not used:", err)
+	}
+}
+
+func TestSettings(t *testing.T) {
+	s, err := parseSettings(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.Stack || !s.DeleteLocal || s.DeleteOnCamera || s.Concurrency != 2 || s.MinFreeBytes != 1<<30 ||
+		s.Stall != 3*time.Minute || s.Reconcile != 10*time.Minute || s.Retry.Base != 5*time.Second || s.Retry.Max != 15*time.Minute ||
+		strings.Join(s.Skip, ",") != ".XML,.THM" {
+		t.Fatalf("defaults: %+v", s)
+	}
+	s, err = parseSettings(map[string]string{"skip_extensions": "none", "delete_on_camera": "true", "upload_concurrency": "4"})
+	if err != nil || len(s.Skip) != 0 || !s.DeleteOnCamera || s.Concurrency != 4 {
+		t.Fatalf("%+v %v", s, err)
+	}
+	s, err = parseSettings(map[string]string{"skip_extensions": "xml, .thm", "stall_timeout": "soon"})
+	if err == nil || s.Stall != 3*time.Minute || strings.Join(s.Skip, ",") != ".XML,.THM" {
+		t.Fatalf("%+v %v", s, err)
+	}
+}
+
+func TestValidateAndFields(t *testing.T) {
+	p := &Plugin{}
+	for name, cfg := range map[string]map[string]string{
+		"bad bool":     {"delete_on_camera": "maybe"},
+		"zero stall":   {"stall_timeout": "0s"},
+		"key only":     {"api_key": "k"},
+		"not a url":    {"url": "immich", "api_key": "k"},
+		"concurrency":  {"upload_concurrency": "0"},
+		"negative MB":  {"min_free_space_mb": "-1"},
+		"bad duration": {"retry_base_delay": "5"},
+	} {
+		if p.Validate(cfg) == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	if err := p.Validate(map[string]string{"url": "http://immich:2283", "api_key": "k", "album": "x"}); err != nil {
+		t.Error(err)
+	}
+	if err := p.Validate(nil); err != nil {
+		t.Error("unconfigured must be valid:", err)
+	}
+	var _ plugin.ConfigValidator = p
+	kinds := map[string]plugin.FieldKind{}
+	for _, f := range p.Fields() {
+		kinds[f.Key] = f.Kind
+	}
+	if len(kinds) != 13 || kinds["api_key"] != plugin.FieldSecret || kinds["delete_on_camera"] != plugin.FieldBool ||
+		kinds["stall_timeout"] != plugin.FieldDuration || kinds["upload_concurrency"] != plugin.FieldInt {
+		t.Errorf("fields: %v", kinds)
 	}
 }
