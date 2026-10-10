@@ -47,7 +47,7 @@ CAMERA_HOST=192.168.1.50 go run ./cmd/alpha2web
 | `CAMERA_USER`, `CAMERA_PASSWORD`, `CAMERA_FINGERPRINT` | Access Authentication (SSH tunnel) |
 | `CAMERA_WAKE_ON_LAN` | `true` sends Wake-on-LAN packets every 30 s while the camera is disconnected (needs a MAC) |
 | `CAMERA_WAKE_ON_LAN_ADDR` | target of those packets, default `255.255.255.255:9` |
-| `CAMERA_KEEPALIVE` | interval of the idle property poll that keeps the session busy and the camera properties fresh, default `10s`, `0` disables |
+| `CAMERA_KEEPALIVE` | interval of the idle property poll that keeps the session busy and the camera properties fresh, default `10s`; `0` sends no property requests of its own after connecting (the property list is then read on demand). `LOG_LEVEL=debug` logs every camera operation with its duration |
 | `CAMERA_RECONNECT_INTERVAL` | first delay between connection attempts, default `5s` (backs off to 1 minute) |
 | `SHUTDOWN_TIMEOUT` | grace period for open requests on SIGTERM, default `20s` |
 | `LOG_LEVEL` | `debug`, `info` (default), `warn`, `error` |

@@ -49,9 +49,13 @@ func effective(v settings.Values, dataDir string) camera.Config {
 	return cfg
 }
 
-// keepalive parses CAMERA_KEEPALIVE: default 10s, "0" disables it.
+// keepalive parses CAMERA_KEEPALIVE: default 10s, "0" turns off every
+// property request of our own (negative for the supervisor).
 func keepalive(v string) time.Duration {
 	if d, err := time.ParseDuration(v); err == nil && d >= 0 {
+		if d == 0 {
+			return -1
+		}
 		return d
 	}
 	return 10 * time.Second

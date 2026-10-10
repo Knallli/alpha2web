@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -41,7 +42,8 @@ type Config struct {
 	DataDir string // remembers the last address and the initiator GUID
 
 	// Keepalive is the interval of the idle property poll that keeps the
-	// session busy and the property cache fresh; 0 disables it.
+	// session busy and the property cache fresh. 0 only reads the properties
+	// once after connecting; negative leaves the camera completely alone.
 	Keepalive time.Duration
 
 	// Discovery tunes the network scan (tests; zero values are fine).
@@ -311,12 +313,29 @@ func (s *Supervisor) mergeProps(ps []ptpip.SonyProp) {
 	s.publish(Event{Props: true})
 }
 
+// trace logs every camera operation at debug level (LOG_LEVEL=debug), and slow
+// or failed ones as warnings, to find out which request makes a camera stall.
+func (s *Supervisor) trace(e ptpip.TraceEvent) {
+	args := []any{"op", ptpip.OpName(e.Op), "code", fmt.Sprintf("0x%04X", e.Op), "params", e.Params, "phase", e.Phase}
+	switch {
+	case e.Phase == "end" && (e.Err != nil || e.Dur > 3*time.Second):
+		s.log.Warn("ptp op", append(args, "took", e.Dur.Round(time.Millisecond), "err", e.Err)...)
+	case e.Phase == "queued" || e.Dur == 0:
+		s.log.Debug("ptp op", args...)
+	default:
+		s.log.Debug("ptp op", append(args, "took", e.Dur.Round(time.Millisecond))...)
+	}
+}
+
 // maintain fills the property cache and, while the session is otherwise idle,
 // polls changed properties every `every`. A broken connection ends the
 // session by itself (c.Done); answers like "not supported" only end the poll.
 // The context must not be given a timeout: a cancelled transaction tears the
 // connection down, and a busy client is not a problem.
 func (s *Supervisor) maintain(ctx context.Context, c *ptpip.Client, every time.Duration, nudge <-chan struct{}) {
+	if every < 0 { // CAMERA_KEEPALIVE=0: no traffic of our own after the handshake
+		return
+	}
 	refresh := func(changedOnly bool) {
 		ps, err := c.SonyGetProps(ctx, changedOnly)
 		if err != nil {
@@ -413,7 +432,7 @@ func (s *Supervisor) session(parent context.Context) error {
 	s.mu.Unlock()
 
 	var d *ptpip.SSHDialer
-	opts := ptpip.Options{Name: "alpha2web", GUID: guid(cfg.DataDir)}
+	opts := ptpip.Options{Name: "alpha2web", GUID: guid(cfg.DataDir), Trace: s.trace}
 	if cfg.SSH != nil {
 		d = ptpip.NewSSHDialer(*cfg.SSH)
 		defer d.Close()
