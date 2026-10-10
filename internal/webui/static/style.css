@@ -82,3 +82,20 @@ code{background:var(--code);padding:1px 5px;border-radius:4px}
 progress{width:100%}
 .badge.s-failed,.badge.s-error{color:var(--bad)}
 .badge.s-uploading,.badge.s-downloading{color:var(--accent)}
+[hidden]{display:none!important}
+#toolbar input[type=search]{margin-bottom:8px}
+.checks{display:flex;flex-wrap:wrap;gap:4px 20px}
+.checks label.check{margin:4px 0}
+.prop{padding:10px 0;border-top:1px solid var(--line)}
+.prop:first-of-type{border-top:0}
+.p-head code{font-size:.8rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.p-head label{display:inline;margin:0}
+.p-desc{margin:2px 0 6px}
+.p-ctl{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.p-ctl select,.p-num{width:auto;min-width:8rem}
+.p-range{width:min(320px,100%)}
+.p-status{min-height:1.2em}
+.p-note,.badge.d-caution,.badge.d-danger{font-size:.85rem}
+.d-caution{color:var(--wait)}.d-danger{color:var(--bad)}
+.badge.d-caution{border:1px solid var(--wait)}.badge.d-danger{border:1px solid var(--bad)}
+.p-note{margin:0 0 6px}

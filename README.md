@@ -5,11 +5,20 @@ Tested on the a6700 only.
 
 - Dashboard with connection status, logs
 - Live view (MJPEG)
-- Control: shutter (with/without autofocus), movie start/stop, camera properties
+- Control: shutter (with/without autofocus), movie start/stop and a settings page for every camera property (see below)
 - Files: list both card slots, thumbnails, download, delete
 - Settings page; environment variables override and lock the fields
 - Plugins (compiled in, see `plugin/`), each can add dashboard blocks, a file table, actions, metrics and settings
 - Immich exporter (`plugins/immich`): downloads everything on both cards, uploads it to Immich with retries, adds it to an album, stacks RAW+JPEG pairs, optionally deletes the local copy and the shot on the card. Dashboard shows queue, progress, problems and recent uploads; actions "Retry waiting files now" and "Read camera again"; `alpha2web_immich_*` metrics.
+
+## Control
+
+The settings cards group the camera's properties (exposure, focus, drive, white balance, ...). Each row has a name, the code, a description and a fitting widget: switch, select, slider, number box, or plain text when the camera does not allow a change right now (the reason is shown). Changes apply at once and the page follows changes made on the camera. Search and the filters narrow the list.
+
+- Names, descriptions and value labels come from the [alpha2go property catalog](https://github.com/Knallli/alpha2go/blob/main/docs/properties.md). A value without a known label is shown as its number.
+- **Caution** marks settings that change behaviour or wear something. **Danger** marks settings that can lose shots, for example sending shots to the host only so they are not written to the card. Both stay disabled until "Enable dangerous actions" is on, and each change asks for confirmation.
+- Settings the catalog does not know are listed as undocumented, hidden by default, and read-only until "Allow editing undocumented settings" is on. The server enforces both rules, not only the page.
+- The server only sends values the camera currently offers. Camera buttons and dials are not on the page yet.
 
 ## Install (Docker)
 

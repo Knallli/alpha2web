@@ -4,7 +4,7 @@ go 1.26.4
 
 require (
 	github.com/gen2brain/h265 v0.2.3
-	github.com/knallli/alpha2go v0.1.1
+	github.com/knallli/alpha2go v0.2.0
 	modernc.org/sqlite v1.60.1
 )
 

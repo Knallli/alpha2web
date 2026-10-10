@@ -1,13 +1,40 @@
-{{template "header" .}}
+{{define "propnote"}}{{if ne .Danger "none"}}<span class="badge d-{{.Danger}}">{{if eq .Danger "danger"}}Danger{{else}}Caution{{end}}</span> <span class="p-note d-{{.Danger}}">{{.Note}}</span>{{end}}{{end}}
+{{- template "header" .}}
+<div id="control" data-csrf="{{.CSRF}}">
 {{if .Msg}}<div class="msg ok">Done: {{.Msg}}</div>{{end}}{{if .Err}}<div class="msg bad">{{.Err}}</div>{{end}}
 <section class="card"><h2>Shutter</h2><div class="actions">
-<form method="post" action="/actions/capture"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary">Capture (manual focus)</button></form>
-<form method="post" action="/actions/capture"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="af" value="1"><button>Capture with autofocus</button></form>
-<form method="post" action="/actions/movie"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary">Start / stop movie</button></form></div></section>
-<section class="card"><h2>Properties</h2><div class="scroll"><table>
-<tr><th>Code</th><th>Value</th><th></th></tr>
-{{range .Props}}<tr><td>0x{{printf "%04X" .Code}}</td><td>{{.Current}}</td><td>{{if .Writable}}
-<form method="post" action="/actions/setprop" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="code" value="{{.Code}}">
-{{if .Choices}}<select name="value">{{range .Choices}}<option>{{.}}</option>{{end}}</select>{{else}}<input name="value" value="{{.Current}}">{{end}}
-<button class="secondary">Set</button></form>{{end}}</td></tr>{{end}}</table></div></section>
+<form method="post" action="/actions/capture" data-act><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary">Capture (manual focus)</button></form>
+<form method="post" action="/actions/capture" data-act><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="af" value="1"><button>Capture with autofocus</button></form>
+<form method="post" action="/actions/movie" data-act data-confirm="Start or stop movie recording?"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary">Start / stop movie</button></form></div>
+<p id="act-status" class="muted" role="status" aria-live="polite"></p></section>
+
+<section class="card" id="toolbar" hidden>
+<h2>Settings</h2>
+<input type="search" id="q" placeholder="Search name, description or code" aria-label="Search settings">
+<div class="checks">
+<label class="check"><input type="checkbox" id="f-change"> Only changeable</label>
+<label class="check"><input type="checkbox" id="f-undoc"> Show undocumented</label>
+<label class="check"><input type="checkbox" id="f-unlock"> Allow editing undocumented settings</label>
+<label class="check"><input type="checkbox" id="f-danger"> Enable dangerous actions</label>
+</div>
+<p id="w-unlock" class="p-note d-danger" hidden>Undocumented settings have no description and can break camera behaviour. Change them only if you know what they do.</p>
+<p id="conn" class="muted" role="status" aria-live="polite"></p>
+</section>
+
+<div id="props">
+{{range .Groups}}<section class="card"><h2>{{.Name}}</h2>
+{{range .Props}}<div class="prop" id="p{{.Code}}">
+<div class="p-head"><strong>{{.Name}}</strong> <code>{{.CodeHex}}</code> {{template "propnote" .}}</div>
+<p class="muted p-desc">{{.Desc}}</p>
+{{if .Writable}}<form method="post" action="/actions/setprop" class="inline"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="code" value="{{.Code}}">
+{{if .Options}}<select name="value" aria-label="{{.Name}}">{{$cur := .Current}}{{range .Options}}<option value="{{.Value}}"{{if eq .Value $cur}} selected{{end}}>{{.Label}}</option>{{end}}</select>
+{{else}}<input type="number" name="value" value="{{.Current}}" aria-label="{{.Name}}">{{end}}
+{{if not .Documented}}<label class="check"><input type="checkbox" name="unlock" value="1"> I know this is undocumented</label>{{end}}
+{{if eq .Danger "danger"}}<label class="check"><input type="checkbox" name="confirm" value="1"> Confirm</label>{{end}}
+<button class="secondary">Set</button></form>
+{{else}}<div class="p-value">{{.Display}}</div><div class="muted">{{.Disabled}}</div>{{end}}
+</div>{{end}}</section>{{end}}
+</div>
+</div>
+<script src="/static/control.js" defer></script>
 {{template "footer" .}}
