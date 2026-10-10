@@ -23,7 +23,10 @@ services:
       - path: .env
         required: false
     volumes:
-      - data:/data   # settings (incl. camera password, API keys), plugin state, staging
+      - data:/data   # settings (incl. camera password, API keys), plugin state
+      - staging:/staging   # downloaded files until Immich has them; use a big disk or a bind mount
+    environment:
+      STAGING_DIR: /staging
     stop_grace_period: 30s
     logging:
       driver: json-file
@@ -33,3 +36,4 @@ services:
 
 volumes:
   data:
+  staging:

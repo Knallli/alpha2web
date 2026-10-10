@@ -84,6 +84,8 @@ type pipeline struct {
 	deleteCheck   atomic.Bool
 	immichOK      atomic.Bool
 	immichVersion atomic.Value // string
+	immichErr     atomic.Value // string: why the last health check failed, "" if it passed or none ran
+	keyProblem    atomic.Value // string: set when Immich refuses the key
 	transfer      atomic.Pointer[transfer]
 }
 
@@ -103,6 +105,8 @@ func newPipeline(env plugin.Env, st *store.Store, staging string) *pipeline {
 		files:       map[string]ref{},
 	}
 	p.immichVersion.Store("")
+	p.immichErr.Store("")
+	p.keyProblem.Store("")
 	return p
 }
 
@@ -131,6 +135,8 @@ func (p *pipeline) client(s settings) *Client {
 		p.im, p.imKey, p.albumID = New(s.URL, s.APIKey, "alpha2web"), key, ""
 		p.immichOK.Store(false)
 		p.immichVersion.Store("")
+		p.immichErr.Store("")
+		p.keyProblem.Store("")
 		wake(p.immichWake)
 	}
 	return p.im
@@ -168,6 +174,30 @@ func (p *pipeline) run(ctx context.Context) {
 	start(func() { p.uploadLoop(ctx) })
 	start(func() { p.postLoop(ctx) })
 	wg.Wait()
+}
+
+// checkKey remembers whether Immich refuses the API key; other errors are
+// transient and leave the last verdict alone.
+func (p *pipeline) checkKey(ctx context.Context, im *Client) {
+	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	err := im.ValidateKey(cctx)
+	switch {
+	case err == nil:
+		p.keyProblem.Store("")
+	case IsAuthError(err):
+		p.keyProblem.Store("Immich refuses the API key or it lacks permissions. It needs: " + strings.Join(requiredPermissions(p.cfg()), ", ") + ".")
+	}
+}
+
+// Rescan asks for a full relist of the cards.
+func (p *pipeline) Rescan() { wake(p.reconcileCh) }
+
+// WakeAll makes every loop look for work now.
+func (p *pipeline) WakeAll() {
+	for _, ch := range []chan struct{}{p.uploadWake, p.postWake, p.immichWake, p.deleteWake} {
+		wake(ch)
+	}
 }
 
 // CurrentTransfer returns the running download, or nil.
@@ -670,12 +700,15 @@ func (p *pipeline) immichLoop(ctx context.Context) {
 		was := p.immichOK.Load()
 		if err != nil {
 			p.immichOK.Store(false)
+			p.immichErr.Store(err.Error())
 			if was || p.immichVersion.Load().(string) == "" {
 				p.log.Error("immich unavailable", "err", err)
 			}
 		} else {
 			p.immichOK.Store(true)
+			p.immichErr.Store("")
 			p.immichVersion.Store(v.String())
+			p.checkKey(ctx, im)
 			if !was {
 				p.log.Info("immich available", "version", v.String())
 				wake(p.uploadWake)

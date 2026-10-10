@@ -8,7 +8,8 @@ Tested on the a6700 only.
 - Control: shutter (with/without autofocus), movie start/stop, camera properties
 - Files: list both card slots, thumbnails, download, delete
 - Settings page; environment variables override and lock the fields
-- Plugins (compiled in, see `plugin/`). The Immich exporter in `plugins/immich` uploads new files and can delete them from the card afterwards.
+- Plugins (compiled in, see `plugin/`), each can add dashboard blocks, a file table, actions, metrics and settings
+- Immich exporter (`plugins/immich`): downloads everything on both cards, uploads it to Immich with retries, adds it to an album, stacks RAW+JPEG pairs, optionally deletes the local copy and the shot on the card. Dashboard shows queue, progress, problems and recent uploads; actions "Retry waiting files now" and "Read camera again"; `alpha2web_immich_*` metrics.
 
 ## Install (Docker)
 
@@ -43,6 +44,10 @@ CAMERA_HOST=192.168.1.50 go run ./cmd/alpha2web
 | `LOG_FORMAT` | `json` (default) or `text` |
 | `HTTP_ADDR` | listen address, default `:8765` |
 | `DATA_DIR` | settings and plugin state, default `data` |
+| `IMMICH_URL`, `IMMICH_API_KEY`, `IMMICH_ALBUM` | Immich server, API key (needs `asset.upload`, `album.*`, `stack.create`) and optional album |
+| `IMMICH_STACK_RAW_JPEG`, `DELETE_AFTER_UPLOAD`, `IMMICH_DELETE_ON_CAMERA` | stack pairs (default `true`), delete the staged copy (default `true`), delete from the card (default `false`) |
+| `SKIP_EXTENSIONS`, `UPLOAD_CONCURRENCY`, `RECONCILE_INTERVAL`, `DOWNLOAD_STALL_TIMEOUT`, `MIN_FREE_SPACE_MB`, `RETRY_BASE_DELAY`, `RETRY_MAX_DELAY` | Immich transfer tuning, see [.env.example](.env.example) |
+| `STAGING_DIR` | where downloads wait for the upload, default `<DATA_DIR>/staging` |
 | `WEBUI_PASSWORD` | optional HTTP basic auth password for the whole UI (`/healthz`, `/health` (JSON) and `/metrics` (Prometheus) stay open) |
 
 ## Limits

@@ -49,6 +49,17 @@ func effective(v settings.Values, dataDir string) camera.Config {
 	return cfg
 }
 
+// pluginConfig returns the stored settings of a plugin with its environment
+// variables applied (environment wins).
+func pluginConfig(v settings.Values, name string) map[string]string {
+	for _, p := range plugin.All() {
+		if p.Name() == name {
+			return plugin.Overlay(p.Fields(), v.Plugins[name], os.Getenv)
+		}
+	}
+	return v.Plugins[name]
+}
+
 var version = "dev"
 
 // subcommand handles "version" and "healthcheck" (used by Docker's HEALTHCHECK).
@@ -148,7 +159,7 @@ func main() {
 		})
 	}
 	go plugin.RunAll(ctx, plugin.Env{Camera: sup, Log: log, DataDir: dataDir},
-		func(name string) map[string]string { return store.Get().Plugins[name] })
+		func(name string) map[string]string { return pluginConfig(store.Get(), name) })
 
 	srv := &http.Server{Addr: env("HTTP_ADDR", ":8765"), Handler: &webui.Handler{
 		Version: version, Camera: sup, Logs: ring, Logger: log, Password: os.Getenv("WEBUI_PASSWORD"), CacheDir: filepath.Join(dataDir, "cache"),

@@ -67,3 +67,19 @@ func TestLogHandler(t *testing.T) {
 		t.Fatal(s)
 	}
 }
+
+func TestPluginConfigOverlay(t *testing.T) {
+	v := settings.Values{Plugins: map[string]map[string]string{"immich": {"url": "saved", "album": "A"}}}
+	t.Setenv("IMMICH_URL", "env")
+	t.Setenv("IMMICH_ALBUM", "")
+	got := pluginConfig(v, "immich")
+	if got["url"] != "env" || got["album"] != "A" {
+		t.Fatalf("%v", got)
+	}
+	if v.Plugins["immich"]["url"] != "saved" {
+		t.Fatal("stored settings modified")
+	}
+	if pluginConfig(v, "unknown") != nil {
+		t.Fatal("unknown plugin")
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -156,4 +157,56 @@ func TestPluginUI(t *testing.T) {
 	// metrics and health
 	has("metrics", do("GET", "/metrics", nil).Body.String(), "full_queue 7")
 	has("health", do("GET", "/health", nil).Body.String(), `"full":{"queue":7}`)
+}
+
+type envPlugin struct{}
+
+func (envPlugin) Name() string { return "envp" }
+func (envPlugin) Fields() []plugin.Field {
+	return []plugin.Field{
+		{Key: "addr", Label: "Address", Env: "ENVP_ADDR"},
+		{Key: "key", Label: "Key", Kind: plugin.FieldSecret, Env: "ENVP_KEY"},
+		{Key: "other", Label: "Other"},
+	}
+}
+func (envPlugin) Run(context.Context, plugin.Env) error { return nil }
+func (envPlugin) Validate(cfg map[string]string) error {
+	if e := os.Getenv("ENVP_ADDR"); e != "" && cfg["addr"] != e {
+		return io.ErrUnexpectedEOF // must see the environment value
+	}
+	return nil
+}
+
+func TestPluginFieldEnv(t *testing.T) {
+	plugin.Register(envPlugin{})
+	t.Setenv("ENVP_ADDR", "http://from-env")
+	store, _ := settings.Open(filepath.Join(t.TempDir(), "s.json"))
+	v := store.Get()
+	v.Plugins = map[string]map[string]string{"envp": {"addr": "stored"}}
+	store.Set(v)
+	h := &Handler{Logs: logbuf.NewRing(1), Camera: camera.New(camera.Config{}, backoff.Default, slog.Default()),
+		Settings: &Settings{Store: store, Locked: func(string) bool { return false }, Apply: func(settings.Values) {}}}
+	do := func(r *http.Request) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	body := do(httptest.NewRequest("GET", "/settings", nil)).Body.String()
+	for _, want := range []string{"Set via ENVP_ADDR", `value="http://from-env"`, `name="plugin.envp.addr" disabled`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if strings.Contains(body, "Set via ENVP_KEY") {
+		t.Error("unset variable locks the field")
+	}
+	form := url.Values{"csrf": {h.csrfToken()}, "plugin.envp.addr": {"hacked"}, "plugin.envp.other": {"x"}}
+	r := httptest.NewRequest("POST", "/settings", strings.NewReader(form.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if w := do(r); w.Code != http.StatusSeeOther {
+		t.Fatal(w.Code, w.Body.String()) // validator saw the env address
+	}
+	if got := store.Get().Plugins["envp"]; got["addr"] != "stored" || got["other"] != "x" {
+		t.Fatalf("%v", got)
+	}
 }

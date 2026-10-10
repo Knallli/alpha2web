@@ -478,6 +478,14 @@ func (s *Store) Recent(ctx context.Context, limit int) ([]File, error) {
 	return s.query(ctx, `ORDER BY updated_at DESC, id DESC LIMIT ?`, limit)
 }
 
+// List returns the most recently changed files with this status ("" = any).
+func (s *Store) List(ctx context.Context, status Status, limit int) ([]File, error) {
+	if status == "" {
+		return s.Recent(ctx, limit)
+	}
+	return s.query(ctx, `WHERE status = ? ORDER BY updated_at DESC, id DESC LIMIT ?`, string(status), limit)
+}
+
 // WithErrors returns unfinished files whose last attempt failed, plus rejected files.
 func (s *Store) WithErrors(ctx context.Context, limit int) ([]File, error) {
 	return s.query(ctx, `WHERE last_error != '' AND status != 'done' ORDER BY updated_at DESC LIMIT ?`, limit)

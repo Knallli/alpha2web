@@ -2,6 +2,7 @@ package webui
 
 import (
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,7 @@ type pluginField struct {
 	Input, Value string
 	IsSet        bool
 	Checked      bool
+	Locked       bool // fixed by the environment variable Field.Env
 }
 
 // Type is the HTML input type.
@@ -53,7 +55,12 @@ func (h *Handler) settingsPage(w http.ResponseWriter, r *http.Request) {
 		idx := map[string]int{}
 		for _, f := range p.Fields() {
 			saved := v.Plugins[p.Name()][f.Key]
-			pf := pluginField{Field: f, Input: "plugin." + p.Name() + "." + f.Key, Value: saved, IsSet: saved != ""}
+			pf := pluginField{Field: f, Input: "plugin." + p.Name() + "." + f.Key, Value: saved, IsSet: saved != "",
+				Locked: f.Env != "" && os.Getenv(f.Env) != ""}
+			if pf.Locked {
+				saved = os.Getenv(f.Env)
+				pf.Value = saved
+			}
 			switch f.Kind {
 			case plugin.FieldSecret:
 				pf.Value = ""
@@ -107,6 +114,13 @@ func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
 	for _, p := range plugin.All() {
 		m := map[string]string{}
 		for _, f := range p.Fields() {
+			if f.Env != "" && os.Getenv(f.Env) != "" {
+				// Locked: keep what is stored, the form did not offer it.
+				if old := v.Plugins[p.Name()][f.Key]; old != "" {
+					m[f.Key] = old
+				}
+				continue
+			}
 			in := "plugin." + p.Name() + "." + f.Key
 			val := strings.TrimSpace(r.FormValue(in))
 			switch f.Kind {
@@ -135,7 +149,7 @@ func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if cv, ok := p.(plugin.ConfigValidator); ok {
-			if err := cv.Validate(m); err != nil {
+			if err := cv.Validate(plugin.Overlay(p.Fields(), m, os.Getenv)); err != nil {
 				http.Error(w, p.Name()+": "+err.Error(), http.StatusBadRequest)
 				return
 			}

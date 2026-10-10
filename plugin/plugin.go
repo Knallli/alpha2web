@@ -29,6 +29,26 @@ type Field struct {
 	Group       string    // card heading; empty = "Plugin: <name>"
 	Placeholder string
 	Help        string
+	// Env, if set and non-empty in the environment, overrides the stored
+	// value; the settings page shows the field locked.
+	Env string
+}
+
+// Overlay returns cfg with the values of non-empty environment variables named
+// by the fields' Env applied. cfg itself is not modified.
+func Overlay(fields []Field, cfg map[string]string, getenv func(string) string) map[string]string {
+	out := make(map[string]string, len(cfg)+len(fields))
+	for k, v := range cfg {
+		out[k] = v
+	}
+	for _, f := range fields {
+		if f.Env != "" {
+			if v := getenv(f.Env); v != "" {
+				out[f.Key] = v
+			}
+		}
+	}
+	return out
 }
 
 // Env is handed to Run.

@@ -29,25 +29,28 @@ const (
 
 func (*Plugin) Fields() []plugin.Field {
 	return []plugin.Field{
-		{Key: "url", Label: "Immich address", Group: groupImmich, Placeholder: "http://immich:2283"},
+		{Key: "url", Label: "Immich address", Group: groupImmich, Placeholder: "http://immich:2283", Env: "IMMICH_URL"},
 		{Key: "api_key", Label: "API key", Kind: plugin.FieldSecret, Group: groupImmich,
-			Help: "needs asset.upload, album.read, album.create, albumAsset.create and stack.create"},
-		{Key: "album", Label: "Album (optional)", Group: groupImmich},
-		{Key: "stack_raw_jpeg", Label: "Stack RAW+JPEG pairs", Kind: plugin.FieldBool, Default: "true", Group: groupImmich},
+			Env:  "IMMICH_API_KEY",
+			Help: "Create one in Immich under Account Settings → API Keys with these permissions: asset.upload, album.read, album.create, albumAsset.create, stack.create. The key is stored in the data volume and never shown again."},
+		{Key: "album", Label: "Album (optional)", Group: groupImmich, Env: "IMMICH_ALBUM"},
+		{Key: "stack_raw_jpeg", Label: "Stack RAW+JPEG pairs", Kind: plugin.FieldBool, Default: "true", Group: groupImmich,
+			Env: "IMMICH_STACK_RAW_JPEG", Help: "Stack RAW+JPEG pairs in Immich (JPEG shown)"},
 
 		{Key: "delete_local", Label: "Delete the downloaded copy after upload", Kind: plugin.FieldBool, Default: "true", Group: groupFiles,
-			Help: "when off, the staging directory keeps every file"},
+			Env: "DELETE_AFTER_UPLOAD", Help: "Delete the local copy after a confirmed upload"},
 		{Key: "delete_on_camera", Label: "Delete from the camera once uploaded", Kind: plugin.FieldBool, Default: "false", Group: groupFiles,
-			Help: "removes a shot from the card after all its files are in Immich; cannot be undone"},
-		{Key: "skip_extensions", Label: "Skip extensions", Default: ".XML,.THM", Group: groupFiles, Help: `"none" skips nothing`},
+			Env:  "IMMICH_DELETE_ON_CAMERA",
+			Help: "Also delete the shot from the camera card after it is confirmed in Immich. Irreversible. Off by default; the old alpha2immich never deleted on the camera."},
+		{Key: "skip_extensions", Label: "Skip extensions", Default: ".XML,.THM", Group: groupFiles, Env: "SKIP_EXTENSIONS", Help: `"none" skips nothing`},
 
-		{Key: "upload_concurrency", Label: "Parallel uploads", Kind: plugin.FieldInt, Default: "2", Group: groupTransfer},
-		{Key: "reconcile_interval", Label: "Full relist of the cards every", Kind: plugin.FieldDuration, Default: "10m", Group: groupTransfer,
+		{Key: "upload_concurrency", Label: "Parallel uploads", Kind: plugin.FieldInt, Default: "2", Group: groupTransfer, Env: "UPLOAD_CONCURRENCY"},
+		{Key: "reconcile_interval", Label: "Full relist of the cards every", Kind: plugin.FieldDuration, Default: "10m", Group: groupTransfer, Env: "RECONCILE_INTERVAL",
 			Help: "new shots are also noticed by a cheap check once a minute"},
-		{Key: "stall_timeout", Label: "Abort a download without data after", Kind: plugin.FieldDuration, Default: "3m", Group: groupTransfer},
-		{Key: "min_free_space_mb", Label: "Pause downloads below free space (MB)", Kind: plugin.FieldInt, Default: "1024", Group: groupTransfer},
-		{Key: "retry_base_delay", Label: "First retry delay", Kind: plugin.FieldDuration, Default: "5s", Group: groupTransfer},
-		{Key: "retry_max_delay", Label: "Longest retry delay", Kind: plugin.FieldDuration, Default: "15m", Group: groupTransfer},
+		{Key: "stall_timeout", Label: "Abort a download without data after", Kind: plugin.FieldDuration, Default: "3m", Group: groupTransfer, Env: "DOWNLOAD_STALL_TIMEOUT"},
+		{Key: "min_free_space_mb", Label: "Pause downloads below free space (MB)", Kind: plugin.FieldInt, Default: "1024", Group: groupTransfer, Env: "MIN_FREE_SPACE_MB"},
+		{Key: "retry_base_delay", Label: "First retry delay", Kind: plugin.FieldDuration, Default: "5s", Group: groupTransfer, Env: "RETRY_BASE_DELAY"},
+		{Key: "retry_max_delay", Label: "Longest retry delay", Kind: plugin.FieldDuration, Default: "15m", Group: groupTransfer, Env: "RETRY_MAX_DELAY"},
 	}
 }
 
