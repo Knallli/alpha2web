@@ -17,6 +17,11 @@ type Values struct {
 	CameraUser        string `json:"camera_user,omitempty"`
 	CameraPassword    string `json:"camera_password,omitempty"`
 	CameraFingerprint string `json:"camera_fingerprint,omitempty"`
+	// Keepalive is the idle property poll interval: empty = 10s, "0" = no
+	// property requests of our own.
+	Keepalive string `json:"keepalive,omitempty"`
+	// DebugLog logs every camera operation with its duration.
+	DebugLog bool `json:"debug_log,omitempty"`
 	// Plugins holds each plugin's own key/value settings, by plugin name.
 	Plugins map[string]map[string]string `json:"plugins,omitempty"`
 }

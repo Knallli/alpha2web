@@ -35,6 +35,7 @@ func env(k, def string) string {
 // envFor maps a settings field to the variable that overrides it.
 var envFor = map[string]string{
 	"host": "CAMERA_HOST", "mac": "CAMERA_MAC", "user": "CAMERA_USER", "password": "CAMERA_PASSWORD", "fingerprint": "CAMERA_FINGERPRINT",
+	"keepalive": "CAMERA_KEEPALIVE",
 }
 
 func locked(field string) bool { return os.Getenv(envFor[field]) != "" }
@@ -42,7 +43,7 @@ func locked(field string) bool { return os.Getenv(envFor[field]) != "" }
 // effective merges the saved settings with the environment (environment wins).
 func effective(v settings.Values, dataDir string) camera.Config {
 	pick := func(field, saved string) string { return env(envFor[field], saved) }
-	cfg := camera.Config{Host: pick("host", v.CameraHost), MAC: pick("mac", v.CameraMAC), DataDir: dataDir, Keepalive: keepalive(os.Getenv("CAMERA_KEEPALIVE"))}
+	cfg := camera.Config{Host: pick("host", v.CameraHost), MAC: pick("mac", v.CameraMAC), DataDir: dataDir, Keepalive: keepalive(env("CAMERA_KEEPALIVE", v.Keepalive))}
 	if user := pick("user", v.CameraUser); user != "" {
 		cfg.SSH = &ptpip.SSHConfig{User: user, Password: pick("password", v.CameraPassword), Fingerprint: pick("fingerprint", v.CameraFingerprint)}
 	}
@@ -96,13 +97,30 @@ func subcommand(arg string) {
 	os.Exit(0)
 }
 
+// logLevel can be raised to debug from the settings page; envLevel is what
+// LOG_LEVEL asked for.
+var (
+	logLevel slog.LevelVar
+	envLevel slog.Level
+)
+
+func applyLogLevel(v settings.Values) {
+	if v.DebugLog {
+		logLevel.Set(slog.LevelDebug)
+	} else {
+		logLevel.Set(envLevel)
+	}
+}
+
 // newLogHandler builds the slog handler from LOG_LEVEL and LOG_FORMAT.
 func newLogHandler(w io.Writer, level, format string) slog.Handler {
 	var l slog.Level
 	if l.UnmarshalText([]byte(level)) != nil {
 		l = slog.LevelInfo
 	}
-	opts := &slog.HandlerOptions{Level: l}
+	envLevel = l
+	logLevel.Set(l)
+	opts := &slog.HandlerOptions{Level: &logLevel}
 	if format == "text" {
 		return slog.NewTextHandler(w, opts)
 	}
@@ -159,6 +177,7 @@ func main() {
 		log.Error("settings", "err", err)
 		os.Exit(1)
 	}
+	applyLogLevel(store.Get())
 	sup := camera.New(effective(store.Get(), dataDir), backoff.Policy{Base: envDuration(log, "CAMERA_RECONNECT_INTERVAL", 5*time.Second), Max: time.Minute, Jitter: 0.2}, log)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -175,7 +194,7 @@ func main() {
 
 	srv := &http.Server{Addr: env("HTTP_ADDR", ":8765"), Handler: &webui.Handler{
 		Version: version, Camera: sup, Logs: ring, Logger: log, Password: os.Getenv("WEBUI_PASSWORD"), CacheDir: filepath.Join(dataDir, "cache"),
-		Settings: &webui.Settings{Store: store, Locked: locked, Apply: func(v settings.Values) { sup.SetConfig(effective(v, dataDir)) }},
+		Settings: &webui.Settings{Store: store, Locked: locked, Apply: func(v settings.Values) { applyLogLevel(v); sup.SetConfig(effective(v, dataDir)) }},
 	}}
 	done := make(chan struct{})
 	go func() {

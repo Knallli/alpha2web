@@ -11,6 +11,10 @@
 <label for="fingerprint">SSH fingerprint (SHA256:…)</label><input id="fingerprint" name="fingerprint" value="{{.V.CameraFingerprint}}"{{if .Lock.fingerprint}} disabled{{end}}>
 <p class="muted">Shown on the camera under MENU → Network → Network Option → Access Authen. Info. The password is only sent to a camera with this fingerprint.</p>
 <p class="muted">Fields set by environment variables are locked.</p></section>
+<section class="card"><h2>Diagnostics</h2>
+<label for="keepalive">Property poll interval</label><input id="keepalive" name="keepalive" value="{{.V.Keepalive}}" placeholder="10s"{{if .Lock.keepalive}} disabled{{end}}>
+<p class="muted">How often the idle session asks the camera for changed properties. 0 = no requests of our own after connecting (use this to test whether they upset the camera).</p>
+<label class="check"><input type="checkbox" name="debug_log" value="1"{{if .V.DebugLog}} checked{{end}}> Log every camera operation with its duration (debug)</label></section>
 {{range .Plugins}}<section class="card"><h2>{{.Title}}</h2>
 {{range .Fields}}{{if eq .Type "checkbox"}}<input type="hidden" name="{{.Input}}.present" value="1">
 <label class="check"><input id="{{.Input}}" name="{{.Input}}" type="checkbox" value="true"{{if .Checked}} checked{{end}}{{if .Locked}} disabled{{end}}> {{.Label}}</label>

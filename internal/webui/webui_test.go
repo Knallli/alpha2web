@@ -141,6 +141,12 @@ func TestSettingsSave(t *testing.T) {
 	if store.Get().CameraPassword != "" {
 		t.Fatal("password not cleared")
 	}
+	if c := post(url.Values{"keepalive": {"0"}, "debug_log": {"1"}}); c != http.StatusSeeOther || store.Get().Keepalive != "0" || !store.Get().DebugLog {
+		t.Fatalf("diagnostics not saved: %d %+v", c, store.Get())
+	}
+	if c := post(url.Values{"keepalive": {"soon"}}); c != http.StatusBadRequest {
+		t.Fatal(c)
+	}
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest("GET", "/settings", nil))
 	if w.Code != 200 || strings.Contains(w.Body.String(), "pw") {

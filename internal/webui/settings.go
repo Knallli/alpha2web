@@ -47,7 +47,7 @@ type pluginCard struct {
 func (h *Handler) settingsPage(w http.ResponseWriter, r *http.Request) {
 	v := h.Settings.Store.Get()
 	lock := map[string]bool{}
-	for _, f := range []string{"host", "mac", "user", "password", "fingerprint"} {
+	for _, f := range []string{"host", "mac", "user", "password", "fingerprint", "keepalive"} {
 		lock[f] = h.Settings.Locked(f)
 	}
 	var cards []pluginCard
@@ -101,6 +101,15 @@ func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
 	set("mac", &v.CameraMAC)
 	set("user", &v.CameraUser)
 	set("fingerprint", &v.CameraFingerprint)
+	if !h.Settings.Locked("keepalive") {
+		ka := strings.TrimSpace(r.FormValue("keepalive"))
+		if d, err := time.ParseDuration(ka); ka != "" && (err != nil || d < 0) {
+			http.Error(w, "Property poll: not a duration like 10s (0 = off)", http.StatusBadRequest)
+			return
+		}
+		v.Keepalive = ka
+	}
+	v.DebugLog = r.FormValue("debug_log") != ""
 	// An empty password field keeps the stored one; "clear" removes it.
 	if !h.Settings.Locked("password") {
 		if r.FormValue("clear_password") != "" {
