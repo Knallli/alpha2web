@@ -905,18 +905,7 @@ func (p *pipeline) postProcess(ctx context.Context, im *Client, s settings, file
 			if f.SourcePath == "" {
 				continue
 			}
-			st, err := os.Stat(f.SourcePath)
-			switch {
-			case err == nil && st.Size() == f.Size:
-				if err := os.Remove(f.SourcePath); err != nil {
-					p.log.Warn("delete library file", "path", f.SourcePath, "err", err)
-					continue
-				}
-			case err != nil && !errors.Is(err, os.ErrNotExist):
-				p.log.Warn("stat library file", "path", f.SourcePath, "err", err)
-				continue
-			}
-			if err := p.store.SetSourcePath(db, f.ID, ""); err == nil {
+			if p.removeLibraryCopy(db, f) {
 				f.SourcePath = ""
 			}
 		}
@@ -952,6 +941,24 @@ func (p *pipeline) postProcess(ctx context.Context, im *Client, s settings, file
 			}
 		}
 	}
+}
+
+// removeLibraryCopy deletes the gallery-pulled copy of an uploaded file and
+// forgets its path. The file is only removed while it still has the uploaded
+// size; it reports whether the path was cleared (the file is gone or foreign).
+func (p *pipeline) removeLibraryCopy(ctx context.Context, f *store.File) bool {
+	st, err := os.Stat(f.SourcePath)
+	switch {
+	case err == nil && st.Size() == f.Size:
+		if err := os.Remove(f.SourcePath); err != nil {
+			p.log.Warn("delete library file", "path", f.SourcePath, "err", err)
+			return false
+		}
+	case err != nil && !errors.Is(err, os.ErrNotExist):
+		p.log.Warn("stat library file", "path", f.SourcePath, "err", err)
+		return false
+	}
+	return p.store.SetSourcePath(ctx, f.ID, "") == nil
 }
 
 func (p *pipeline) pruneEmptyDirs(dir string) {

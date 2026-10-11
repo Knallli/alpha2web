@@ -264,6 +264,7 @@ type viewFile struct {
 	Path   string `json:"path"`
 	Size   uint64 `json:"size"`
 	Pulled bool   `json:"pulled"`
+	Immich bool   `json:"immich"`
 }
 
 type viewItem struct {
@@ -273,6 +274,7 @@ type viewItem struct {
 	Exts    []string   `json:"exts"`
 	Files   []viewFile `json:"files"`
 	Pulled  bool       `json:"pulled"`
+	Immich  bool       `json:"immich"` // every file is held by a plugin
 }
 
 func (h *Handler) galleryPage(w http.ResponseWriter, r *http.Request) {
@@ -313,11 +315,13 @@ func (h *Handler) galleryPage(w http.ResponseWriter, r *http.Request) {
 		d.Next = d.Page + 1
 	}
 	for _, it := range s.Items[min((d.Page-1)*galleryPageSize, len(s.Items)):min(d.Page*galleryPageSize, len(s.Items))] {
-		v := viewItem{Key: it.Key, Created: it.Created, Video: it.Video, Exts: it.Exts, Pulled: true}
+		v := viewItem{Key: it.Key, Created: it.Created, Video: it.Video, Exts: it.Exts, Pulled: true, Immich: len(it.Files) > 0}
 		wanted := 0
 		for _, f := range it.Files {
 			p := pulled(f)
-			v.Files = append(v.Files, viewFile{f.Path, f.Size, p})
+			im := h.stored(r.Context(), slot, it, f)
+			v.Immich = v.Immich && im
+			v.Files = append(v.Files, viewFile{f.Path, f.Size, p, im})
 			if cfg.Wants(export.Type(fileExt(f.Path))) {
 				wanted++
 				v.Pulled = v.Pulled && p
@@ -341,6 +345,8 @@ func sniff(b []byte) string {
 		return "image/jpeg"
 	case len(b) >= 8 && string(b[4:8]) == "ftyp":
 		return "image/heic"
+	case len(b) >= 12 && string(b[:4]) == "RIFF" && string(b[8:12]) == "WEBP":
+		return "image/webp"
 	}
 	return "application/octet-stream"
 }
@@ -419,6 +425,15 @@ func (h *Handler) galleryPreview(w http.ResponseWriter, r *http.Request) {
 	cover := it.Files[it.Cover]
 	if pulled(cover) && viewable(fileExt(cover.Path)) {
 		if data, err := os.ReadFile(cover.Local); err == nil {
+			serveImage(w, h.putImage(slot, it, "preview", data))
+			return
+		}
+	}
+	// a copy a plugin holds (Immich) needs no camera
+	if rc, _, ok := h.openStored(r.Context(), slot, it, cover, true); ok {
+		data, err := io.ReadAll(io.LimitReader(rc, maxViewBytes))
+		rc.Close()
+		if err == nil && len(data) > 0 {
 			serveImage(w, h.putImage(slot, it, "preview", data))
 			return
 		}
@@ -520,6 +535,14 @@ func (h *Handler) galleryFile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if rc, ct, ok := h.openStored(r.Context(), slot, it, f, false); ok {
+		defer rc.Close()
+		if ct != "" {
+			w.Header().Set("Content-Type", ct)
+		}
+		io.Copy(w, rc)
+		return
+	}
 	c, done, err := h.use(r)
 	if err != nil {
 		h.cameraFail(w, err)
@@ -604,6 +627,7 @@ func (h *Handler) galleryRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /gallery/preview", h.galleryPreview)
 	m.HandleFunc("GET /gallery/file", h.galleryFile)
 	m.HandleFunc("POST /gallery/delete", h.galleryDelete)
+	m.HandleFunc("POST /gallery/purge", h.galleryPurge)
 	m.HandleFunc("GET /gallery/job", h.jobStatus)
 	m.HandleFunc("POST /gallery/job/stop", h.jobStop)
 	m.HandleFunc("POST /gallery/refresh", h.galleryRefresh)

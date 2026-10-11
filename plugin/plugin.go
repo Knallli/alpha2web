@@ -4,6 +4,8 @@ package plugin
 
 import (
 	"context"
+	"errors"
+	"io"
 	"log/slog"
 	"slices"
 	"strings"
@@ -33,6 +35,19 @@ type LocalFile struct {
 	CapturedAt time.Time // content creation time (SonyContent.CreatedUTC)
 	Size       int64
 	Local      string // absolute path of the copy; importers must not move or delete it unless the user opted in
+}
+
+// ErrNotStored means the plugin does not hold the file.
+var ErrNotStored = errors.New("plugin does not hold this file")
+
+// Viewer is optional: it serves a file the plugin has stored elsewhere (for
+// example in Immich), so the gallery can show it after the library copy is gone.
+type Viewer interface {
+	// Stored reports whether the plugin holds the file.
+	Stored(ctx context.Context, f LocalFile) bool
+	// Open returns the original, or with preview a JPEG/WebP rendition, and its
+	// content type. It returns ErrNotStored if the file is not held.
+	Open(ctx context.Context, f LocalFile, preview bool) (io.ReadCloser, string, error)
 }
 
 // Importer is optional: files pulled in the gallery are handed to it.

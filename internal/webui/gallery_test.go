@@ -8,6 +8,7 @@ import (
 	"html"
 	"image"
 	"image/jpeg"
+	"io"
 	"log/slog"
 	"net/http/httptest"
 	"net/url"
@@ -16,6 +17,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -415,5 +417,55 @@ func TestStatForNeedsCaptureTime(t *testing.T) {
 	}
 	if n, _ := statFor(map[string]bool{p: true}, shot)(p); n != export.Taken {
 		t.Fatal("a path owned by the catalog is taken", n)
+	}
+}
+
+// stubViewer holds every file once on is set; it is off for all other tests.
+type stubViewer struct{ on atomic.Bool }
+
+func (*stubViewer) Name() string                                    { return "stubviewer" }
+func (*stubViewer) Fields() []plugin.Field                          { return nil }
+func (*stubViewer) Run(ctx context.Context, _ plugin.Env) error     { <-ctx.Done(); return nil }
+func (v *stubViewer) Stored(context.Context, plugin.LocalFile) bool { return v.on.Load() }
+func (v *stubViewer) Open(_ context.Context, _ plugin.LocalFile, _ bool) (io.ReadCloser, string, error) {
+	if !v.on.Load() {
+		return nil, "", plugin.ErrNotStored
+	}
+	return io.NopCloser(strings.NewReader("\xff\xd8stored\xff\xd9")), "image/jpeg", nil
+}
+
+func TestGalleryPurgeRemovesCopiesStoredElsewhere(t *testing.T) {
+	v := &stubViewer{}
+	plugin.Register(v)
+	jpg := "\xff\xd8hello\xff\xd9"
+	h, srv := galleryFixture(t, map[string]string{"DSC00001.JPG": jpg, "DSC00002.ARW": "rawonly"})
+	runJob(t, h, "/gallery/refresh", nil)
+	keys := itemKeys(h, 1)
+	runJob(t, h, "/gallery/pull", url.Values{"slot": {"1"}, "k": keys})
+	dir := filepath.Join(h.exportCfg().Dir, "ILCE-6700", "slot1", "100MSDCF")
+	if _, err := os.Stat(filepath.Join(dir, "DSC00001.JPG")); err != nil {
+		t.Fatal(err)
+	}
+	// nothing is held elsewhere yet: purge removes nothing
+	if w := post(h, "/gallery/purge", url.Values{"slot": {"1"}}); w.Code != 303 || !strings.Contains(w.Header().Get("Location"), "0+library+files") {
+		t.Fatalf("%d %s", w.Code, w.Header().Get("Location"))
+	}
+	v.on.Store(true)
+	defer v.on.Store(false)
+	w := post(h, "/gallery/purge", url.Values{"slot": {"1"}})
+	if w.Code != 303 || !strings.Contains(w.Header().Get("Location"), "2+library+files") {
+		t.Fatalf("%d %s", w.Code, w.Header().Get("Location"))
+	}
+	if _, err := os.Stat(filepath.Join(dir, "DSC00001.JPG")); !os.IsNotExist(err) {
+		t.Fatalf("copy still there: %v", err)
+	}
+	if !strings.Contains(get(h, "/gallery").Body.String(), "in Immich") {
+		t.Fatal("not marked as stored")
+	}
+	// a pull does not fetch them from the camera again
+	n := len(srv.ContentRequests())
+	j := runJob(t, h, "/gallery/pull", url.Values{"slot": {"1"}, "k": keys})
+	if !strings.Contains(j.Result, "stored in Immich") || len(srv.ContentRequests()) != n {
+		t.Fatalf("%+v", j)
 	}
 }

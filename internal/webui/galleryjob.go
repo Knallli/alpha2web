@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -264,7 +265,7 @@ func (h *Handler) pull(c *ptpip.Client, release func(), cfg export.Config, slot 
 	}
 	g.mu.Unlock()
 	var local []plugin.LocalFile
-	var gone, copied, skipped, seq int
+	var gone, copied, skipped, inPlugin, seq int
 loop:
 	for _, it := range items {
 		if g.stop.Load() {
@@ -292,6 +293,10 @@ loop:
 		for i, f := range it.Files {
 			if !cfg.Wants(export.Type(fileExt(f.Path))) {
 				skipped++
+				continue
+			}
+			if !pulled(f) && h.stored(context.Background(), slot, it, f) {
+				inPlugin++ // lives in Immich only: not copied again
 				continue
 			}
 			target := f.Local
@@ -328,6 +333,9 @@ loop:
 	res := fmt.Sprintf("%d files copied, %d already in the library.", copied, len(local)-copied)
 	if skipped > 0 {
 		res += fmt.Sprintf(" %d files skipped by the file type setting.", skipped)
+	}
+	if inPlugin > 0 {
+		res += fmt.Sprintf(" %d files are stored in Immich and were not copied.", inPlugin)
 	}
 	if gone > 0 {
 		res += fmt.Sprintf(" %d items are no longer on the card.", gone)
@@ -388,4 +396,56 @@ func download(c *ptpip.Client, slot, id uint32, f *ptpip.SonyContentFile, target
 		os.Remove(tmp)
 	}
 	return err
+}
+
+// galleryPurge removes the library copies of files a plugin (Immich) holds, so
+// they live there only. The card and the plugin's copy are not touched.
+func (h *Handler) galleryPurge(w http.ResponseWriter, r *http.Request) {
+	g := h.galleryState()
+	g.mu.Lock()
+	busy := g.job.Kind != "" && !g.job.Finished
+	g.mu.Unlock()
+	if busy {
+		http.Error(w, "A job is running; wait until it has finished.", http.StatusConflict)
+		return
+	}
+	root := filepath.Clean(h.exportCfg().Dir)
+	var removed, failed int
+	for slot := uint32(1); slot <= 2; slot++ {
+		g.mu.Lock()
+		items := slices.Clone(g.cat.Slots[slot-1].Items)
+		g.mu.Unlock()
+		for _, it := range items {
+			for _, f := range it.Files {
+				if !pulled(f) || !h.stored(r.Context(), slot, it, f) {
+					continue
+				}
+				if err := os.Remove(f.Local); err != nil && !errors.Is(err, os.ErrNotExist) {
+					h.Log().Warn("gallery purge", "path", f.Local, "err", err)
+					failed++
+					continue
+				}
+				pruneEmpty(filepath.Dir(f.Local), root)
+				g.record(slot, it.Key, f, "")
+				removed++
+			}
+		}
+	}
+	g.mu.Lock()
+	h.saveLocked()
+	g.mu.Unlock()
+	msg := fmt.Sprintf("%d library files removed; they live in Immich only.", removed)
+	if failed > 0 {
+		msg += fmt.Sprintf(" %d could not be removed (see the log).", failed)
+	}
+	http.Redirect(w, r, "/gallery?slot="+strconv.Itoa(int(slotParam(r)))+"&done="+url.QueryEscape(msg), http.StatusSeeOther)
+}
+
+// pruneEmpty removes empty directories from dir up to (not including) root.
+func pruneEmpty(dir, root string) {
+	for dir = filepath.Clean(dir); strings.HasPrefix(dir, root+string(filepath.Separator)); dir = filepath.Dir(dir) {
+		if os.Remove(dir) != nil { // not empty
+			return
+		}
+	}
 }

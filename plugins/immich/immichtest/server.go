@@ -3,6 +3,7 @@
 package immichtest
 
 import (
+	"bytes"
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
@@ -19,6 +20,7 @@ import (
 type Asset struct {
 	ID, Filename, Checksum, CreatedAt, ModifiedAt string
 	Size                                          int
+	data                                          []byte
 }
 
 // Server is a fake Immich server.
@@ -142,6 +144,8 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		s.bulkCheck(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/api/assets":
 		s.upload(w, r)
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/assets/") && (strings.HasSuffix(r.URL.Path, "/original") || strings.HasSuffix(r.URL.Path, "/thumbnail")):
+		s.serveAsset(w, strings.Split(r.URL.Path, "/")[3])
 	case r.Method == http.MethodGet && r.URL.Path == "/api/albums":
 		s.listAlbums(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/api/albums":
@@ -196,6 +200,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	fields := map[string]string{}
 	h := sha1.New()
+	var content bytes.Buffer
 	size, gotFile := 0, false
 	for {
 		p, err := mr.NextPart()
@@ -207,7 +212,8 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if p.FormName() == "assetData" {
-			n, err := io.Copy(h, p)
+			content.Reset()
+			n, err := io.Copy(io.MultiWriter(h, &content), p)
 			if err != nil {
 				writeJSON(w, 400, map[string]any{"message": err.Error()})
 				return
@@ -247,7 +253,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := s.nextID()
-	s.assets[id] = &Asset{ID: id, Filename: fields["filename"], Checksum: sum, CreatedAt: fields["fileCreatedAt"], ModifiedAt: fields["fileModifiedAt"], Size: size}
+	s.assets[id] = &Asset{ID: id, Filename: fields["filename"], Checksum: sum, CreatedAt: fields["fileCreatedAt"], ModifiedAt: fields["fileModifiedAt"], Size: size, data: content.Bytes()}
 	s.byChecksum[sum] = id
 	writeJSON(w, 201, map[string]any{"id": id, "status": "created"})
 }
@@ -317,4 +323,16 @@ func (s *Server) createStack(w http.ResponseWriter, r *http.Request) {
 	defer s.mu.Unlock()
 	s.stacks = append(s.stacks, in.AssetIDs)
 	writeJSON(w, 201, map[string]any{"id": s.nextID(), "primaryAssetId": in.AssetIDs[0], "assets": []any{}})
+}
+
+func (s *Server) serveAsset(w http.ResponseWriter, id string) {
+	s.mu.Lock()
+	a := s.assets[id]
+	s.mu.Unlock()
+	if a == nil {
+		writeJSON(w, 404, map[string]any{"message": "not found"})
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Write(a.data)
 }

@@ -107,7 +107,7 @@
       a.textContent = f.path;
       const s = document.createElement("span");
       s.className = "muted";
-      s.textContent = " " + f.size + " B" + (f.pulled ? " · pulled" : "");
+      s.textContent = " " + f.size + " B" + (f.pulled ? " · pulled" : "") + (f.immich ? " · in Immich" : "");
       li.append(a, s);
       return li;
     }));

@@ -39,6 +39,10 @@ Camera setup (Wi-Fi, PC Remote, Access Authentication): see [alpha2go](https://g
 
 `docker-compose.dev.yml` runs the newest code of a branch straight from GitHub on every container start (default `main`, set `BRANCH=...` for another): `restart` = update, no image pull. It compiles on start and runs unreviewed code, so use the pinned `ghcr.io/knallli/alpha2web` image above for production. See the header of the file.
 
+### Immich as the only copy
+
+Everything new is imported automatically. The gallery is for picking shots: pulled originals are handed to Immich too. Set `DELETE_LIBRARY_AFTER_UPLOAD=true` to drop the library copy once Immich confirmed it, or press **Remove local copies stored in Immich** in the gallery to clean up everything that is already there (also files pulled earlier). The gallery then shows those files straight from Immich ("in Immich" badge) and does not copy them from the camera again. Deleting from the card is a separate option (`IMMICH_DELETE_ON_CAMERA`).
+
 ## Run without Docker
 
 ```

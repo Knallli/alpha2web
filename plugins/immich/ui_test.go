@@ -2,6 +2,7 @@ package immich
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -189,4 +190,30 @@ func TestDeleteLibraryRemovesPulledCopyAfterUpload(t *testing.T) {
 	if a := im.Assets(); len(a) != 1 {
 		t.Fatalf("%+v", a)
 	}
+}
+
+func TestViewerServesUploadedFile(t *testing.T) {
+	im := immichtest.New(t)
+	p := startPlugin(t, map[string]string{"url": im.URL, "api_key": im.APIKey}) // delete_library stays off
+	data := jpeg("lib", 5000)
+	local := filepath.Join(t.TempDir(), "DSC00011.JPG")
+	if err := os.WriteFile(local, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lf := plugin.LocalFile{Camera: "ILCE-6700", Slot: 1, Path: "DCIM/100MSDCF/DSC00011.JPG", CapturedAt: shot, Size: int64(len(data)), Local: local}
+	if err := p.Import(context.Background(), []plugin.LocalFile{lf}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "done", func() bool { return len(p.Files(context.Background(), "done", 10)) == 1 })
+	if !p.Stored(context.Background(), lf) {
+		t.Fatal("not reported as stored")
+	}
+	rc, _, err := p.Open(context.Background(), lf, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := io.ReadAll(rc); len(b) != len(data) {
+		t.Fatalf("immich copy: %d bytes", len(b))
+	}
+	rc.Close()
 }

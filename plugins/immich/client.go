@@ -310,6 +310,30 @@ func (c *Client) CreateStack(ctx context.Context, assetIDs []string) (string, er
 }
 
 // BaseURL returns the server URL as configured (with the /api suffix).
+// Fetch streams a GET response (an image or the original file). The caller closes it.
+func (c *Client) Fetch(ctx context.Context, path string) (io.ReadCloser, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	if c.apiKey != "" {
+		req.Header.Set("x-api-key", c.apiKey)
+	}
+	if c.ua != "" {
+		req.Header.Set("User-Agent", c.ua)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		resp.Body.Close()
+		return nil, "", &APIError{Method: http.MethodGet, Path: path, Status: resp.StatusCode, Body: strings.TrimSpace(string(msg))}
+	}
+	return resp.Body, resp.Header.Get("Content-Type"), nil
+}
+
 func (c *Client) BaseURL() string { return c.base }
 
 // RequiredPermissions are the API key permissions alpha2web needs.

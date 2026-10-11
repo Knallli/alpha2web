@@ -11,13 +11,13 @@
 {{if .S.Err}}<div class="msg bad">{{.S.Err}}</div>{{end}}
 {{if .Never}}<p class="muted">Nothing is loaded from the camera yet. "Load from camera" lists the cards and fetches the thumbnails once; after that this page works without the camera.</p>
 {{else if .S.Empty}}<p class="muted">No card in slot {{.Slot}}, or it holds no files.</p>{{end}}
-{{if .Total}}<div class="actions sel-bar"><button type="button" class="secondary" id="g-page">Select page</button><button type="button" class="secondary" id="g-all">Select all in slot ({{.Total}})</button><button type="button" class="secondary" id="g-none">Clear selection</button><button type="button" id="g-pull" disabled><svg class="ico"><use href="#i-download"/></svg><span>Pull selected (0)</span></button></div>
+{{if .Total}}<div class="actions sel-bar"><button type="button" class="secondary" id="g-page">Select page</button><button type="button" class="secondary" id="g-all">Select all in slot ({{.Total}})</button><button type="button" class="secondary" id="g-none">Clear selection</button><form method="post" action="/gallery/purge" class="inline-form" data-confirm="Delete every library copy that is already stored in Immich? The copies in Immich and on the card stay."><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="slot" value="{{.Slot}}"><button class="secondary"><svg class="ico"><use href="#i-trash"/></svg>Remove local copies stored in Immich</button></form><button type="button" id="g-pull" disabled><svg class="ico"><use href="#i-download"/></svg><span>Pull selected (0)</span></button></div>
 <p class="muted">Tip: shift-click a checkbox to select a range. Pulled originals go to <code>{{if .Library}}{{.Library}}{{else}}(LIBRARY_DIR is not set){{end}}</code>; files already there with the same size are skipped.</p>{{end}}
 <div class="g-grid">
 {{range $i, $it := .Items}}<div class="g-card" data-i="{{$i}}"><input type="checkbox" class="g-sel" value="{{$it.Key}}" aria-label="Select">
 <button type="button" class="g-open" data-i="{{$i}}" aria-label="Open original"><img loading="lazy" alt="" src="/gallery/thumb?slot={{$.Slot}}&k={{$it.Key}}"></button>
 <span class="g-meta"><span>{{$it.Created.Format "2006-01-02 15:04"}}</span>
-<span>{{if $it.Video}}<span class="badge">&#9654; Video</span> {{end}}{{range $it.Exts}}<span class="badge">{{.}}</span> {{end}}{{if $it.Pulled}}<span class="badge s-done">pulled</span> {{end}}{{if gt (len $it.Files) 1}}<span class="muted">{{len $it.Files}} files</span>{{end}}</span></span></div>
+<span>{{if $it.Video}}<span class="badge">&#9654; Video</span> {{end}}{{range $it.Exts}}<span class="badge">{{.}}</span> {{end}}{{if $it.Immich}}<span class="badge s-done">in Immich</span> {{end}}{{if $it.Pulled}}<span class="badge s-done">pulled</span> {{end}}{{if gt (len $it.Files) 1}}<span class="muted">{{len $it.Files}} files</span>{{end}}</span></span></div>
 {{end}}
 </div>
 {{if or .Prev .Next}}<p class="pager">{{if .Prev}}<a href="/gallery?slot={{.Slot}}&page={{.Prev}}">&larr; Newer</a>{{end}} <span class="muted">Page {{.Page}}</span> {{if .Next}}<a href="/gallery?slot={{.Slot}}&page={{.Next}}">Older &rarr;</a>{{end}}</p>{{end}}
