@@ -82,10 +82,11 @@ func newLiveFixture(t *testing.T) *liveFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(f.srv.Close)
-	f.sup = camera.New(camera.Config{Host: f.srv.Addr()}, backoff.Policy{Base: 50 * time.Millisecond, Max: 100 * time.Millisecond}, slog.Default())
+	f.sup = camera.New(camera.Config{Host: f.srv.Addr(), Linger: time.Hour}, backoff.Policy{Base: 50 * time.Millisecond, Max: 100 * time.Millisecond}, slog.Default())
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go f.sup.Run(ctx)
+	f.sup.Connect()
 	for i := 0; !f.sup.Status().Connected; i++ {
 		if i > 200 {
 			t.Fatal("not connected")

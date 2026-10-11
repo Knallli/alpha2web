@@ -1,6 +1,6 @@
 // The pipeline moves files from the camera to Immich:
 //
-//	reconcile (list both cards, record new files)
+//	sync, only on request (connect, list both cards, record new files)
 //	  -> download (one at a time) -> verify + SHA-1 -> staging
 //	  -> upload workers (bulk-upload-check, POST /assets)
 //	  -> post-processing (album, RAW+JPEG stack, delete staged copy)
@@ -12,6 +12,7 @@
 package immich
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -61,27 +62,24 @@ type pipeline struct {
 	Metrics Metrics
 
 	// Tunables; tests shorten them.
-	statfs    func(dir string) (free int64, err error)
-	idle      time.Duration // how often idle workers re-check the database
-	poll      time.Duration // how often the cards are checked for changes
-	relistGap time.Duration // minimum gap between relists caused by failed lookups
+	statfs func(dir string) (free int64, err error)
+	idle   time.Duration // how often idle workers re-check the database
 
-	reconcileCh, uploadWake, postWake, immichWake, deleteWake chan struct{}
+	syncCh, uploadWake, postWake, immichWake chan struct{}
 
-	mu       sync.Mutex
-	files    map[string]ref // identity -> ids of the current listing
-	contents []content
-	byID     map[string]int // identity -> index in contents
-	listedAt time.Time
-	listedBy *ptpip.Client // the session the listing belongs to
-	sig      string
-	lowSpace bool
-	im       *Client
-	imKey    string
-	album    string
-	albumID  string
+	mu         sync.Mutex
+	files      map[string]ref // identity -> ids of the current listing
+	contents   []content
+	byID       map[string]int // identity -> index in contents
+	lastSync   time.Time
+	lastResult string
+	lowSpace   bool
+	im         *Client
+	imKey      string
+	album      string
+	albumID    string
 
-	deleteCheck   atomic.Bool
+	syncing       atomic.Bool
 	immichOK      atomic.Bool
 	immichVersion atomic.Value // string
 	immichErr     atomic.Value // string: why the last health check failed, "" if it passed or none ran
@@ -92,17 +90,14 @@ type pipeline struct {
 func newPipeline(env plugin.Env, st *store.Store, staging string) *pipeline {
 	p := &pipeline{
 		env: env, log: env.Log, store: st, staging: staging,
-		statfs:    freeBytes,
-		idle:      5 * time.Second,
-		poll:      time.Minute,
-		relistGap: 30 * time.Second,
+		statfs: freeBytes,
+		idle:   5 * time.Second,
 
-		reconcileCh: make(chan struct{}, 1),
-		uploadWake:  make(chan struct{}, 1),
-		postWake:    make(chan struct{}, 1),
-		immichWake:  make(chan struct{}, 1),
-		deleteWake:  make(chan struct{}, 1),
-		files:       map[string]ref{},
+		syncCh:     make(chan struct{}, 1),
+		uploadWake: make(chan struct{}, 1),
+		postWake:   make(chan struct{}, 1),
+		immichWake: make(chan struct{}, 1),
+		files:      map[string]ref{},
 	}
 	p.immichVersion.Store("")
 	p.immichErr.Store("")
@@ -164,11 +159,8 @@ func sleep(ctx context.Context, d time.Duration, ch <-chan struct{}) bool {
 
 // run blocks until ctx is done. Camera operations are cancelled with it.
 func (p *pipeline) run(ctx context.Context) {
-	events, stop := p.env.Camera.Subscribe()
-	defer stop()
 	var wg sync.WaitGroup
 	start := func(f func()) { wg.Add(1); go func() { defer wg.Done(); f() }() }
-	start(func() { p.eventLoop(ctx, events) })
 	start(func() { p.immichLoop(ctx) })
 	start(func() { p.downloadLoop(ctx) })
 	start(func() { p.uploadLoop(ctx) })
@@ -190,12 +182,18 @@ func (p *pipeline) checkKey(ctx context.Context, im *Client) {
 	}
 }
 
-// Rescan asks for a full relist of the cards.
-func (p *pipeline) Rescan() { wake(p.reconcileCh) }
+// StartSync asks for a sync run; it reports false if one is already running.
+func (p *pipeline) StartSync() bool {
+	if !p.syncing.CompareAndSwap(false, true) {
+		return false
+	}
+	wake(p.syncCh)
+	return true
+}
 
 // WakeAll makes every loop look for work now.
 func (p *pipeline) WakeAll() {
-	for _, ch := range []chan struct{}{p.uploadWake, p.postWake, p.immichWake, p.deleteWake} {
+	for _, ch := range []chan struct{}{p.uploadWake, p.postWake, p.immichWake} {
 		wake(ch)
 	}
 }
@@ -276,13 +274,15 @@ func (w progressWriter) Write(b []byte) (int, error) {
 
 var unsafeID = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
-func (p *pipeline) cameraID() string {
-	id := strings.Trim(unsafeID.ReplaceAllString(p.env.Camera.Status().Model, "_"), "_")
+func sanitizeID(model string) string {
+	id := strings.Trim(unsafeID.ReplaceAllString(model, "_"), "_")
 	if id == "" {
 		id = "camera"
 	}
 	return id
 }
+
+func (p *pipeline) cameraID() string { return sanitizeID(p.env.Camera.Status().Model) }
 
 func itemKey(d store.Discovered) string {
 	return fmt.Sprintf("%d|%s|%d|%d", d.Slot, d.Path, d.CapturedAt.UnixMilli(), d.Size)
@@ -303,31 +303,10 @@ func cleanPath(p string) string {
 	return strings.TrimLeft(path.Clean("/"+p), "/")
 }
 
-// signature is a cheap fingerprint of both cards (the capture dates), so a
-// full listing is only needed when something was added or removed.
-func (p *pipeline) signature(ctx context.Context, cam *ptpip.Client) string {
-	var b strings.Builder
-	for slot := uint32(1); slot <= 2; slot++ {
-		ds, err := cam.SonyGetCapturedDateList(ctx, slot)
-		if err != nil {
-			b.WriteString("err;")
-			continue
-		}
-		var sum, last int64
-		for _, d := range ds {
-			sum += d.UnixMilli()
-			last = d.UnixMilli()
-		}
-		fmt.Fprintf(&b, "%d/%d/%d;", len(ds), sum, last)
-	}
-	return b.String()
-}
-
 // reconcile lists both cards in full and records new files. Content IDs of
-// the listing are only valid for this session.
-func (p *pipeline) reconcile(ctx context.Context, cam *ptpip.Client, s settings) error {
+// the listing are only valid for this session. It returns the new files.
+func (p *pipeline) reconcile(ctx context.Context, cam *ptpip.Client, s settings) (int, error) {
 	camID := p.cameraID()
-	sig := p.signature(ctx, cam)
 	files := map[string]ref{}
 	byID := map[string]int{}
 	var contents []content
@@ -338,8 +317,8 @@ func (p *pipeline) reconcile(ctx context.Context, cam *ptpip.Client, s settings)
 		if err != nil {
 			// Only "no card in this slot" may be skipped. Any other failure (a
 			// timeout, a dropped session) must not look like an empty card.
-			if !ptpip.IsCode(err, 0x201D) && !ptpip.IsCode(err, 0x2013) {
-				return err
+			if !errors.Is(err, ptpip.ErrSlotEmpty) {
+				return 0, err
 			}
 			p.log.Debug("slot has no card", "slot", slot, "err", err)
 			continue
@@ -363,109 +342,95 @@ func (p *pipeline) reconcile(ctx context.Context, cam *ptpip.Client, s settings)
 	}
 	added, err := p.store.UpsertDiscovered(context.WithoutCancel(ctx), discovered)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	p.mu.Lock()
-	newSession := p.listedBy != cam
 	p.files, p.contents, p.byID = files, contents, byID
-	p.listedAt, p.listedBy, p.sig = time.Now(), cam, sig
 	p.mu.Unlock()
-	if newSession {
-		// Whatever failed because the camera was away is worth trying at once.
-		if err := p.store.ResetBackoff(ctx, camID); err != nil {
-			p.log.Error("reset backoff", "err", err)
-		}
-	}
-	p.deleteCheck.Store(true)
 	p.Metrics.Reconciles.Add(1)
 	p.log.Info("reconciled camera contents", "camera_id", camID, "files_on_camera", len(files), "new", added, "skipped", skipped)
-	return nil
+	return added, nil
 }
 
-func (p *pipeline) eventLoop(ctx context.Context, events <-chan camera.Event) {
+const cardUnavailableMsg = "The camera did not allow access to the memory card. Close the menu or playback on the camera and make sure the Sony app is not connected, then sync again."
+
+// downloadLoop waits for sync requests; nothing touches the camera otherwise.
+func (p *pipeline) downloadLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case ev := <-events:
-			if ev.Connected != nil && *ev.Connected {
-				wake(p.reconcileCh)
-			}
+		case <-p.syncCh:
 		}
-	}
-}
-
-// idleWait sleeps until there may be work; it reports a request to relist.
-func (p *pipeline) idleWait(ctx context.Context) bool {
-	t := time.NewTimer(p.idle)
-	defer t.Stop()
-	select {
-	case <-p.reconcileCh:
-		return true
-	case <-t.C:
-	case <-p.deleteWake:
-	case <-ctx.Done():
-	}
-	return false
-}
-
-// relistSoon asks for a new listing after a lookup failed, at most once per relistGap.
-func (p *pipeline) relistSoon() {
-	p.mu.Lock()
-	due := time.Since(p.listedAt) >= p.relistGap
-	p.mu.Unlock()
-	if due {
-		wake(p.reconcileCh)
-	}
-}
-
-func (p *pipeline) downloadLoop(ctx context.Context) {
-	var lastPoll time.Time
-	force := false
-	for ctx.Err() == nil {
-		s := p.cfg()
-		select {
-		case <-p.reconcileCh:
-			force = true
-		default:
-		}
-		cam, err := p.env.Camera.Client()
-		if err != nil {
-			force = p.idleWait(ctx) || force
-			continue
-		}
+		res := p.sync(ctx)
+		p.log.Info("camera sync finished", "result", res)
 		p.mu.Lock()
-		need := force || p.listedBy != cam
-		listedAt, sig := p.listedAt, p.sig
+		p.lastSync, p.lastResult = time.Now(), res
 		p.mu.Unlock()
-		if !need && time.Since(lastPoll) >= p.poll {
-			// The camera does not announce new shots to the host, so look.
-			lastPoll = time.Now()
-			need = p.signature(ctx, cam) != sig || time.Since(listedAt) >= s.Reconcile
+		p.syncing.Store(false)
+	}
+}
+
+// sync connects, transfers every due file of the listing and returns a
+// readable result. The lease is released at the end; the session closes by
+// itself after the linger time.
+func (p *pipeline) sync(ctx context.Context) string {
+	s := p.cfg()
+	cam, release, err := p.env.Camera.Acquire(ctx)
+	if err != nil {
+		return camera.Explain(err)
+	}
+	defer release()
+	added, err := p.reconcile(ctx, cam, s)
+	if err != nil {
+		if errors.Is(err, ptpip.ErrCardUnavailable) {
+			return cardUnavailableMsg
 		}
-		reconciled := false
-		if need {
-			if err := p.reconcile(ctx, cam, s); err != nil {
-				p.log.Warn("reconcile failed", "err", err)
-				sleep(ctx, p.idle, nil)
-				continue
-			}
-			force, reconciled, lastPoll = false, true, time.Now()
-		}
-		did, missed, err := p.downloadNext(ctx, cam, s)
+		return camera.Explain(err)
+	}
+	downloaded, failed := 0, 0
+	res := ""
+loop:
+	for ctx.Err() == nil {
+		out, err := p.downloadNext(ctx, cam, s)
 		if err != nil {
 			p.log.Error("download step failed", "err", err)
+			res = "Stopped: " + err.Error()
+			break
 		}
-		if missed && !reconciled {
-			p.relistSoon()
-		}
-		if s.DeleteOnCamera && p.deleteCheck.Swap(false) {
-			p.deleteDone(ctx, cam)
-		}
-		if !did {
-			force = p.idleWait(ctx) || force
+		switch out {
+		case dlNone:
+			break loop
+		case dlOK:
+			downloaded++
+		case dlFailed:
+			failed++
+		case dlLost:
+			failed++
+			res = "Stopped: " + cmp.Or(p.env.Camera.Status().LastDropReason, "the connection to the camera was lost")
+			break loop
 		}
 	}
+	if s.DeleteOnCamera && ctx.Err() == nil && res == "" {
+		p.deleteDone(ctx, cam)
+	}
+	r := fmt.Sprintf("%d new, %d downloaded", added, downloaded)
+	if failed > 0 {
+		r += fmt.Sprintf(", %d failed", failed)
+	}
+	if c, err := p.store.Counts(ctx); err == nil && c[store.StatusPending] > 0 {
+		r += fmt.Sprintf(", %d still waiting", c[store.StatusPending])
+	}
+	p.mu.Lock()
+	low := p.lowSpace
+	p.mu.Unlock()
+	if low {
+		r += ". Paused: not enough free space"
+	}
+	if res != "" {
+		r += ". " + res
+	}
+	return r
 }
 
 func (p *pipeline) freeSpaceOK(s settings) bool {
@@ -504,13 +469,22 @@ func ident(f store.File) store.Discovered {
 	return store.Discovered{Camera: f.Camera, Slot: f.Slot, Path: f.Path, CapturedAt: f.CapturedAt, Size: f.Size}
 }
 
-// downloadNext transfers one due file. did reports that it did any work;
-// missed that due files exist which are not in the current listing.
-func (p *pipeline) downloadNext(ctx context.Context, cam *ptpip.Client, s settings) (did, missed bool, err error) {
+type dlResult int
+
+const (
+	dlNone   dlResult = iota // nothing (more) to download in this listing
+	dlOK                     // one file downloaded
+	dlFailed                 // one file failed; the next may work
+	dlLost                   // the session is gone or stalled; end the sync
+)
+
+// downloadNext transfers one due file of the current listing. Due files that
+// are not on the card are skipped.
+func (p *pipeline) downloadNext(ctx context.Context, cam *ptpip.Client, s settings) (dlResult, error) {
 	camID := p.cameraID()
 	due, err := p.store.DuePending(ctx, camID, 200)
 	if err != nil {
-		return false, false, err
+		return dlNone, err
 	}
 	var f store.File
 	var r ref
@@ -523,18 +497,15 @@ func (p *pipeline) downloadNext(ctx context.Context, cam *ptpip.Client, s settin
 		}
 	}
 	p.mu.Unlock()
-	if !found {
-		return false, len(due) > 0, nil
-	}
-	if !p.freeSpaceOK(s) {
-		return false, false, nil
+	if !found || !p.freeSpaceOK(s) {
+		return dlNone, nil
 	}
 
 	db := context.WithoutCancel(ctx)
 	if err := p.store.StartDownload(db, f.ID); err != nil {
-		return false, false, err
+		return dlNone, err
 	}
-	fail := func(err error, count bool) (bool, bool, error) {
+	fail := func(err error, count bool) (dlResult, error) {
 		next := time.Now()
 		if count {
 			next = next.Add(s.Retry.Delay(f.DownloadAttempts + 1))
@@ -542,9 +513,9 @@ func (p *pipeline) downloadNext(ctx context.Context, cam *ptpip.Client, s settin
 		}
 		p.log.Warn("download failed", "file", f.Path, "err", err, "retry_at", next.UTC().Format(time.RFC3339), "counted", count)
 		if ferr := p.store.FailDownload(db, f.ID, err.Error(), next, count); ferr != nil {
-			return true, false, ferr
+			return dlFailed, ferr
 		}
-		return true, false, nil
+		return dlFailed, nil
 	}
 	partialDir := filepath.Join(p.staging, ".partial")
 	if err := os.MkdirAll(partialDir, 0o755); err != nil {
@@ -597,15 +568,26 @@ func (p *pipeline) downloadNext(ctx context.Context, cam *ptpip.Client, s settin
 	if err != nil {
 		os.Remove(partPath)
 		if stalled.Load() {
-			return fail(fmt.Errorf("stalled: no data for %s", s.Stall), true)
+			res, ferr := fail(fmt.Errorf("stalled: no data for %s", s.Stall), true)
+			if ferr == nil {
+				res = dlLost
+			}
+			return res, ferr
 		}
 		transient := ctx.Err() != nil || !p.env.Camera.Status().Connected
-		if !transient {
-			p.relistSoon() // the content ID may be stale
+		res, ferr := fail(err, !transient)
+		if transient && ferr == nil {
+			res = dlLost
 		}
-		return fail(err, !transient)
+		return res, ferr
 	}
-	return true, false, nil
+	return dlOK, nil
+}
+
+// stagedPath is where the verified copy of f lives until it is uploaded.
+func (p *pipeline) stagedPath(f store.File) string {
+	dir, base := filepath.Split(safeRelPath(f.Path))
+	return filepath.Join(p.staging, f.Camera, fmt.Sprintf("slot%d", f.Slot), dir, fmt.Sprintf("%d_%s", f.ID, base))
 }
 
 func (p *pipeline) finishDownload(db context.Context, f store.File, partPath string, log *slog.Logger, started time.Time) error {
@@ -613,8 +595,7 @@ func (p *pipeline) finishDownload(db context.Context, f store.File, partPath str
 	if err != nil {
 		return fmt.Errorf("verify: %w", err)
 	}
-	dir, base := filepath.Split(safeRelPath(f.Path))
-	final := filepath.Join(p.staging, p.cameraID(), fmt.Sprintf("slot%d", f.Slot), dir, fmt.Sprintf("%d_%s", f.ID, base))
+	final := p.stagedPath(f)
 	if err := os.MkdirAll(filepath.Dir(final), 0o755); err != nil {
 		return err
 	}
@@ -939,19 +920,12 @@ func (p *pipeline) postProcess(ctx context.Context, im *Client, s settings, file
 	}
 
 	// 4. Finish rows with nothing left to do.
-	finished := false
 	for _, f := range files {
 		if (f.LocalDeleted || !s.DeleteLocal) && f.AlbumAdded && f.Stacked {
 			if err := p.store.Done(db, f.ID); err != nil && !errors.Is(err, store.ErrInvalidTransition) {
 				p.log.Error("finish file", "id", f.ID, "err", err)
-			} else {
-				finished = true
 			}
 		}
-	}
-	if finished {
-		p.deleteCheck.Store(true)
-		wake(p.deleteWake)
 	}
 }
 

@@ -75,7 +75,7 @@ func (p *Plugin) Status(ctx context.Context) plugin.Status {
 	switch {
 	case !configured:
 		st.Level = "wait"
-		st.Notice, st.NoticeLink = "Immich is not connected yet. Camera downloads already run and are uploaded afterwards.", "/settings"
+		st.Notice, st.NoticeLink = "Immich is not set up yet. Synced or pulled files wait and are uploaded once it is.", "/settings"
 	case pl.immichOK.Load() && keyProblem == "":
 		st.Level, st.Headline = "ok", "Connected"
 	case pl.immichOK.Load() || pl.immichErr.Load().(string) != "":
@@ -91,6 +91,16 @@ func (p *Plugin) Status(ctx context.Context) plugin.Status {
 			{Label: "Version", Value: pl.immichVersion.Load().(string)},
 			{Label: "Address", Value: s.URL, Link: s.URL},
 		}
+	}
+
+	pl.mu.Lock()
+	lastSync, lastResult := pl.lastSync, pl.lastResult
+	pl.mu.Unlock()
+	if pl.syncing.Load() {
+		st.Rows = append(st.Rows, plugin.Row{Label: "Sync running", Value: "yes"})
+	}
+	if !lastSync.IsZero() {
+		st.Rows = append(st.Rows, plugin.Row{Label: "Last camera sync", Value: ago(lastSync) + ": " + lastResult})
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, uiTimeout)
@@ -171,8 +181,8 @@ func (p *Plugin) Files(ctx context.Context, status string, limit int) []plugin.F
 
 func (*Plugin) Actions() []plugin.Action {
 	return []plugin.Action{
-		{ID: "retry", Label: "Retry waiting files now", Primary: true},
-		{ID: "rescan", Label: "Read camera again"},
+		{ID: "sync", Label: "Sync new files from camera", Primary: true},
+		{ID: "retry", Label: "Retry waiting files now"},
 	}
 }
 
@@ -188,9 +198,11 @@ func (p *Plugin) Do(ctx context.Context, id string) (string, error) {
 		}
 		pl.WakeAll()
 		return "Waiting files will be retried now.", nil
-	case "rescan":
-		pl.Rescan()
-		return "Reading the camera cards again.", nil
+	case "sync":
+		if !pl.StartSync() {
+			return "A sync is already running.", nil
+		}
+		return "Sync started.", nil
 	}
 	return "", fmt.Errorf("unknown action %q", id)
 }

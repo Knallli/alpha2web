@@ -87,15 +87,11 @@ func streamMJPEG(w http.ResponseWriter, r *http.Request, next func() ([]byte, er
 	return n, r.Context().Err()
 }
 
-// openLive opens the stream on the current session. The PTP transaction that
-// reads the URL must not be cancelled with the browser request (that would
-// break the camera session), so the stream gets its own context, which ends
-// with the returned cancel func.
-func (h *Handler) openLive(r *http.Request) (*ptpip.SonyLiveView, context.CancelFunc, error) {
-	c, err := h.client(r)
-	if err != nil {
-		return nil, nil, err
-	}
+// openLive opens the stream on c. The PTP transaction that reads the URL must
+// not be cancelled with the browser request (that would break the camera
+// session), so the stream gets its own context, which ends with the returned
+// cancel func.
+func (h *Handler) openLive(r *http.Request, c *ptpip.Client) (*ptpip.SonyLiveView, context.CancelFunc, error) {
 	sctx, cancel := context.WithCancel(context.WithoutCancel(r.Context()))
 	t := time.AfterFunc(20*time.Second, cancel)
 	lv, err := c.SonyOpenLiveView(sctx)
@@ -108,15 +104,18 @@ func (h *Handler) openLive(r *http.Request) (*ptpip.SonyLiveView, context.Cancel
 }
 
 func (h *Handler) liveStream(w http.ResponseWriter, r *http.Request) {
-	if _, err := h.Camera.Client(); err != nil && !h.Camera.Status().Reconnecting {
-		http.Error(w, camera.Explain(err), http.StatusServiceUnavailable)
-		return
-	}
 	if !h.live.begin() {
 		http.Error(w, "live view already open in another tab", http.StatusConflict)
 		return
 	}
 	defer h.live.end()
+	// one lease for the whole stream: the session stays open, and is reopened after a drop
+	c, done, err := h.use(r)
+	if err != nil {
+		http.Error(w, camera.Explain(err), http.StatusServiceUnavailable)
+		return
+	}
+	defer done()
 	log := h.Log()
 	var (
 		lv     *ptpip.SonyLiveView
@@ -130,7 +129,7 @@ func (h *Handler) liveStream(w http.ResponseWriter, r *http.Request) {
 		lv.Close()
 		cancel()
 		log.Info("live view closed", "frames", n, "err", err)
-		lv = nil
+		lv, c = nil, nil // c may belong to a dead session; fetch the current one
 	}
 	defer func() {
 		if lv != nil {
@@ -156,7 +155,14 @@ func (h *Handler) liveStream(w http.ResponseWriter, r *http.Request) {
 		for r.Context().Err() == nil {
 			if lv == nil {
 				var err error
-				if lv, cancel, err = h.openLive(r); err != nil {
+				if c == nil {
+					c, err = h.Camera.Client()
+				}
+				if err == nil {
+					lv, cancel, err = h.openLive(r, c)
+				}
+				if err != nil {
+					c = nil
 					if err = fail("open failed", err); err != nil {
 						return nil, err
 					}
@@ -197,7 +203,7 @@ func (h *Handler) liveStatus(w http.ResponseWriter, _ *http.Request) {
 	l := &h.live
 	l.mu.Lock()
 	out := map[string]any{
-		"connected": st.Connected, "reconnecting": st.Reconnecting, "error": l.err,
+		"connected": st.Connected, "connecting": st.Connecting, "reconnecting": st.Reconnecting, "error": l.err,
 		"frames": l.frames, "fps": l.fps, "drops": st.Drops, "lastDropReason": st.LastDropReason,
 	}
 	l.mu.Unlock()

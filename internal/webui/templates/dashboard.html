@@ -10,7 +10,7 @@
 <p class="muted">{{.Percent}} % · {{bytes .Done}}{{if .Size}} of {{bytes .Size}}{{end}}{{if .BytesPerSec}} · {{bytes (int64 .BytesPerSec)}}/s{{end}}{{if .ETA}} · {{.ETA}} left{{end}} · running {{since .Started}}</p></section>{{end}}{{end}}{{end}}
 <div class="grid">
 <section class="card"><h2>Camera</h2>
-<p class="big">{{if .S.Connected}}<span class="dot ok"></span>Connected{{else if .S.Reconnecting}}<span class="dot wait"></span>Reconnecting…{{else}}<span class="dot wait"></span>Searching…{{end}}</p>
+<p class="big">{{if .S.Connected}}<span class="dot ok"></span>Connected{{else if .S.Reconnecting}}<span class="dot wait"></span>Reconnecting…{{else if .S.Connecting}}<span class="dot wait"></span>Connecting…{{else}}<span class="dot wait"></span>Not connected — connects when needed{{end}}</p>
 <dl><dt>Address</dt><dd>{{.S.Host}}</dd>
 {{if .S.Model}}<dt>Model</dt><dd>{{.S.Model}}</dd>{{end}}
 {{if .S.Serial}}<dt>Serial</dt><dd>{{.S.Serial}}</dd>{{end}}
@@ -19,7 +19,10 @@
 <dt>Restarts</dt><dd>{{.Restarts}}</dd></dl>
 {{if .S.LastDropReason}}<p class="muted">{{.S.LastDropReason}}</p>{{end}}
 {{if and .S.LastError (not .S.Connected)}}<p class="muted bad" title="{{.S.LastError}}">{{.S.LastError}}</p>{{end}}
-{{if not .S.Connected}}<p class="muted">Turn the camera on (Wi-Fi + PC Remote).</p>{{end}}</section>
+{{if and .S.LastError (not .S.Connected)}}<p class="muted">Turn the camera on (Wi-Fi + PC Remote).</p>{{end}}
+<div class="actions">{{if .S.Connected}}<form method="post" action="/camera/disconnect"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary">Disconnect</button></form>
+{{else if not (or .S.Connecting .S.Reconnecting)}}<form method="post" action="/camera/connect"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Connect</button></form>{{end}}</div>
+<p class="muted">The camera accepts only one remote connection. Do not use the Sony app (Creators' App / Imaging Edge) at the same time — it blocks alpha2web or drops its session.</p></section>
 {{range .Plugins}}{{if or .Headline .Rows}}<section class="card"><h2>{{.Title}}</h2>
 {{if .Headline}}<p class="big">{{if .Level}}<span class="dot {{cls .Level}}"></span>{{end}}{{.Headline}}</p>{{end}}
 <dl>{{range .Rows}}<dt>{{.Label}}</dt><dd>{{if .Link}}<a href="{{.Link}}" target="_blank" rel="noopener">{{.Value}}</a>{{else}}{{.Value}}{{end}}</dd>{{end}}</dl></section>{{end}}

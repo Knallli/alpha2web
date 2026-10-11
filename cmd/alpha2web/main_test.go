@@ -91,3 +91,11 @@ func TestKeepalive(t *testing.T) {
 		}
 	}
 }
+
+func TestIdleDisconnect(t *testing.T) {
+	for in, want := range map[string]time.Duration{"": 30 * time.Second, "5s": 5 * time.Second, "junk": 30 * time.Second, "-1s": 30 * time.Second} {
+		if got := idleDisconnect(in); got != want {
+			t.Errorf("%q: %v", in, got)
+		}
+	}
+}

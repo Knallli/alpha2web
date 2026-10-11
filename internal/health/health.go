@@ -45,15 +45,16 @@ type report struct {
 	Plugins  map[string]any `json:"plugins"`
 }
 
-// Health answers 200 with status "degraded" while the camera is away, so
-// monitoring sees it without a container restart.
+// Health answers 200 with status "degraded" while a camera session that was in
+// use has dropped, so monitoring sees it without a container restart. Not being
+// connected is the normal idle state.
 func (h *Handler) Health(w http.ResponseWriter, _ *http.Request) {
 	st := h.Source.Status()
 	rep := report{Status: "ok", Problems: []string{}, Version: h.Version, Plugins: map[string]any{},
 		Camera: cameraInfo{st.Connected, st.Host, st.Model, h.Source.Restarts(), st.LastError}}
-	if !st.Connected {
+	if st.Reconnecting {
 		rep.Status = "degraded"
-		rep.Problems = append(rep.Problems, "camera not connected")
+		rep.Problems = append(rep.Problems, "camera connection lost, reconnecting")
 	}
 	if h.Plugins != nil {
 		rep.Plugins = h.Plugins()

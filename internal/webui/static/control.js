@@ -242,7 +242,8 @@
       if (!r.ok) throw new Error("HTTP " + r.status);
       const j = await r.json();
       connected = j.connected;
-      $("conn").textContent = connected ? "" : j.reason || "Camera reconnecting…";
+      $("conn").textContent = connected ? "" : (j.reason || "The camera is not connected.") + " Press Connect to open the session.";
+      $("connect").hidden = connected;
       dirty = false;
       if (version == null) buildAll(j.props); else update(j.props);
       if (!dirty) version = j.version;

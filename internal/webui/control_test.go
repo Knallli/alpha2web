@@ -25,10 +25,11 @@ func TestControl(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer srv.Close()
-	sup := camera.New(camera.Config{Host: srv.Addr()}, backoff.Default, slog.Default())
+	sup := camera.New(camera.Config{Host: srv.Addr(), Linger: time.Hour}, backoff.Default, slog.Default())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go sup.Run(ctx)
+	sup.Connect()
 	for i := 0; !sup.Status().Connected; i++ {
 		if i > 200 {
 			t.Fatal("not connected")
@@ -73,7 +74,8 @@ func TestControlBannerWithoutCamera(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest("GET", "/control", nil))
 	b := w.Body.String()
-	if w.Code != 200 || !strings.Contains(b, `msg wait`) || !strings.Contains(b, "The camera is not connected.") || strings.Contains(b, "msg bad") {
+	// idle is normal: no banner, a Connect button, and the page opened no session
+	if w.Code != 200 || strings.Contains(b, `msg wait`) || strings.Contains(b, "msg bad") || !strings.Contains(b, `action="/camera/connect"`) || h.Camera.Status().Connecting {
 		t.Fatalf("%d %s", w.Code, b)
 	}
 }
@@ -101,10 +103,11 @@ func TestControlProps(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer srv.Close()
-	sup := camera.New(camera.Config{Host: srv.Addr()}, backoff.Default, slog.Default())
+	sup := camera.New(camera.Config{Host: srv.Addr(), Linger: time.Hour}, backoff.Default, slog.Default())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go sup.Run(ctx)
+	sup.Connect()
 	for i := 0; ; i++ {
 		if ps, _ := sup.Props(); len(ps) == 6 {
 			break

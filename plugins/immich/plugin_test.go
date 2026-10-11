@@ -28,7 +28,7 @@ func TestPluginUploads(t *testing.T) {
 	defer cam.Close()
 	im := immichtest.New(t)
 
-	sup := camera.New(camera.Config{Host: cam.Addr()}, backoff.Default, slog.Default())
+	sup := camera.New(camera.Config{Host: cam.Addr(), Linger: time.Hour}, backoff.Default, slog.Default())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go sup.Run(ctx)
@@ -37,16 +37,20 @@ func TestPluginUploads(t *testing.T) {
 	t.Setenv("STAGING_DIR", staging)
 	cfg := map[string]string{"url": im.URL, "api_key": im.APIKey, "album": "Cam", "delete_on_camera": "true"}
 	done := make(chan struct{})
+	pl := &Plugin{}
 	go func() {
-		(&Plugin{}).Run(ctx, plugin.Env{Camera: sup, Log: slog.Default(), DataDir: data, Config: func() map[string]string { return cfg }})
+		pl.Run(ctx, plugin.Env{Camera: sup, Log: slog.Default(), DataDir: data, Config: func() map[string]string { return cfg }})
 		close(done)
 	}()
+	waitFor(t, "pipeline", func() bool { return pl.pipe.Load() != nil })
+	syncNow(t, pl)
 	waitFor(t, "upload", func() bool { return len(im.Assets()) > 0 })
 	if a := im.Assets()[0]; a.Filename != "DSC00001.JPG" {
 		t.Fatalf("%+v", a)
 	}
 	waitFor(t, "album", func() bool { return len(im.AlbumAssets("Cam")) == 1 })
-	waitFor(t, "camera delete", func() bool { return len(cam.Deletes()) == 1 })
+	// the camera delete step of a sync handles files finished before it
+	waitFor(t, "camera delete", func() bool { pl.pipe.Load().StartSync(); return len(cam.Deletes()) == 1 })
 	cancel()
 	<-done
 	if _, err := os.Stat(filepath.Join(data, "immich.db")); err != nil {
@@ -63,7 +67,7 @@ func TestSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !s.Stack || !s.DeleteLocal || s.DeleteOnCamera || s.Concurrency != 2 || s.MinFreeBytes != 1<<30 ||
-		s.Stall != 3*time.Minute || s.Reconcile != 10*time.Minute || s.Retry.Base != 5*time.Second || s.Retry.Max != 15*time.Minute ||
+		s.Stall != 3*time.Minute || s.Retry.Base != 5*time.Second || s.Retry.Max != 15*time.Minute ||
 		strings.Join(s.Skip, ",") != ".XML,.THM" {
 		t.Fatalf("defaults: %+v", s)
 	}
@@ -103,7 +107,7 @@ func TestValidateAndFields(t *testing.T) {
 	for _, f := range p.Fields() {
 		kinds[f.Key] = f.Kind
 	}
-	if len(kinds) != 13 || kinds["api_key"] != plugin.FieldSecret || kinds["delete_on_camera"] != plugin.FieldBool ||
+	if len(kinds) != 12 || kinds["api_key"] != plugin.FieldSecret || kinds["delete_on_camera"] != plugin.FieldBool ||
 		kinds["stall_timeout"] != plugin.FieldDuration || kinds["upload_concurrency"] != plugin.FieldInt {
 		t.Errorf("fields: %v", kinds)
 	}

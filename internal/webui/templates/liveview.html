@@ -1,7 +1,8 @@
 {{template "header" .}}
 <section class="card"><h2>Live view</h2>
-<img id="live" src="/liveview.mjpeg" alt="Live view" class="live">
-<p id="live-status" class="muted" role="status">Connecting…</p>
+<div class="actions"><button id="live-start">Start live view</button><button id="live-stop" class="secondary" hidden>Stop</button></div>
+<img id="live" alt="Live view" class="live" hidden>
+<p id="live-status" class="muted" role="status">Press Start to connect to the camera.</p>
 <p class="muted">Only one live-view stream is possible at a time.</p></section>
 <script src="/static/liveview.js" defer></script>
 {{template "footer" .}}

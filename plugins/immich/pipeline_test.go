@@ -1,8 +1,10 @@
 package immich
 
 import (
+	"cmp"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -54,10 +56,15 @@ func put(t *testing.T, root, rel string, data []byte, mtime time.Time) {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(p, data, 0o644); err != nil {
+	// Written beside the card and renamed in: a sync must never see half a file.
+	tmp := filepath.Join(filepath.Dir(root), ".put")
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chtimes(p, mtime, mtime); err != nil {
+	if err := os.Chtimes(tmp, mtime, mtime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(tmp, p); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -98,6 +105,7 @@ type harness struct {
 	p       *pipeline
 	sup     *camera.Supervisor
 	cancel  context.CancelFunc
+	linger  time.Duration // camera session linger; 0 = an hour
 	done    chan struct{}
 
 	mu  sync.Mutex
@@ -156,10 +164,10 @@ func (h *harness) startAt(addr string, tweak ...func(*pipeline)) {
 	}
 	h.st = st
 	log := quietLog()
-	h.sup = camera.New(camera.Config{Host: addr}, backoff.Policy{Base: 10 * time.Millisecond, Max: 50 * time.Millisecond}, log)
+	h.sup = camera.New(camera.Config{Host: addr, Linger: cmp.Or(h.linger, time.Hour)}, backoff.Policy{Base: 10 * time.Millisecond, Max: 50 * time.Millisecond}, log)
 	env := plugin.Env{Camera: h.sup, Log: log, DataDir: h.data, Config: h.config}
 	h.p = newPipeline(env, st, h.staging)
-	h.p.idle, h.p.poll, h.p.relistGap = 20*time.Millisecond, 100*time.Millisecond, 50*time.Millisecond
+	h.p.idle = 20 * time.Millisecond
 	for _, f := range tweak {
 		f(h.p)
 	}
@@ -206,9 +214,33 @@ func (h *harness) waitCounts(want map[store.Status]int) {
 	h.t.Fatalf("timed out; want %v, counts=%v", want, h.counts())
 }
 
+// syncWaitFor asks for a sync again and again (a request while one runs is
+// ignored) until cond holds.
+func (h *harness) syncWaitFor(what string, cond func() bool) {
+	h.t.Helper()
+	waitFor(h.t, what, func() bool {
+		h.p.StartSync()
+		return cond()
+	})
+}
+
+// syncUntil syncs until the file counts match want.
+func (h *harness) syncUntil(want map[store.Status]int) {
+	h.t.Helper()
+	h.syncWaitFor(fmt.Sprint(want), func() bool {
+		c := h.counts()
+		for st, n := range want {
+			if c[st] != n {
+				return false
+			}
+		}
+		return true
+	})
+}
+
 func (h *harness) waitDone(n int) {
 	h.t.Helper()
-	h.waitCounts(map[store.Status]int{store.StatusDone: n})
+	h.syncUntil(map[store.Status]int{store.StatusDone: n})
 }
 
 func stagedFiles(t *testing.T, root string) []string {
@@ -286,7 +318,7 @@ func TestStackingOffAndNoSkip(t *testing.T) {
 	}
 }
 
-func TestNewCaptureWhileConnected(t *testing.T) {
+func TestSyncFindsNewCapture(t *testing.T) {
 	card := sampleCard(t)
 	cam := startCamera(t, ptpiptest.Options{Dir: card})
 	h := newHarness(t, nil, "", "")
@@ -297,7 +329,7 @@ func TestNewCaptureWhileConnected(t *testing.T) {
 	put(t, card, "slot1/DCIM/100MSDCF/DSC00003.JPG", jpeg("3", 1000), shot.Add(time.Hour))
 	h.waitDone(5)
 	if h.p.Metrics.Reconciles.Load() == n {
-		t.Error("new shot was not noticed by a relist")
+		t.Error("new shot was not noticed by a new listing")
 	}
 }
 
@@ -423,7 +455,7 @@ func TestMinFreeSpaceGatesDownloads(t *testing.T) {
 		p.statfs = func(string) (int64, error) { return free.Load(), nil }
 	})
 	defer h.stop()
-	waitFor(t, "listing", func() bool { return h.counts()[store.StatusPending] == 4 })
+	h.syncWaitFor("listing", func() bool { return h.counts()[store.StatusPending] == 4 })
 	time.Sleep(300 * time.Millisecond)
 	if n := h.p.Metrics.Downloads.Load(); n != 0 || h.counts()[store.StatusPending] != 4 {
 		t.Fatalf("downloaded %d files with the disk full", n)
@@ -451,9 +483,13 @@ func TestDeleteOnCameraWaitsForAllFiles(t *testing.T) {
 	h.set("delete_on_camera", "true")
 	h.start(cam)
 	defer h.stop()
-	h.waitCounts(map[store.Status]int{store.StatusDone: 3, store.StatusRejected: 1})
-	waitFor(t, "two deletes", func() bool { return len(cam.Deletes()) == 2 })
-	time.Sleep(300 * time.Millisecond) // later reconciles must not delete again
+	h.syncUntil(map[store.Status]int{store.StatusDone: 3, store.StatusRejected: 1})
+	// the delete step of a sync only sees files finished before it
+	h.syncWaitFor("two deletes", func() bool { return len(cam.Deletes()) == 2 })
+	for range 3 { // later syncs must not delete again
+		h.p.StartSync()
+		time.Sleep(100 * time.Millisecond)
+	}
 	got := cam.Deletes()
 	if len(got) != 2 {
 		t.Fatalf("deletes = %v", got)
@@ -485,7 +521,7 @@ func TestDeleteOnCameraOnceAfterEverythingUploaded(t *testing.T) {
 	h.start(cam)
 	defer h.stop()
 	h.waitDone(4)
-	waitFor(t, "three deletes", func() bool { return len(cam.Deletes()) == 3 })
+	h.syncWaitFor("three deletes", func() bool { return len(cam.Deletes()) == 3 })
 	time.Sleep(300 * time.Millisecond)
 	if n := len(cam.Deletes()); n != 3 {
 		t.Fatalf("deletes = %v", cam.Deletes())
@@ -540,7 +576,7 @@ func TestRestartResumesDownloadedFiles(t *testing.T) {
 	srv.FailNext(1 << 20)
 	h := newHarness(t, srv, staging, db)
 	h.start(cam)
-	h.waitCounts(map[store.Status]int{store.StatusDownloaded: 4})
+	h.syncUntil(map[store.Status]int{store.StatusDownloaded: 4})
 	h.stop()
 
 	srv.FailNext(0)
@@ -598,7 +634,7 @@ func TestUnsupportedFormatIsRejected(t *testing.T) {
 	h.srv.RejectExtension(".XYZ")
 	h.start(cam)
 	defer h.stop()
-	h.waitCounts(map[store.Status]int{store.StatusDone: 1, store.StatusRejected: 1})
+	h.syncUntil(map[store.Status]int{store.StatusDone: 1, store.StatusRejected: 1})
 }
 
 func TestLateRAWStacksWithFinishedJPEG(t *testing.T) {
@@ -606,9 +642,6 @@ func TestLateRAWStacksWithFinishedJPEG(t *testing.T) {
 	put(t, card, "slot1/DCIM/100MSDCF/DSC00001.JPG", jpeg("1", 300_000), shot)
 	cam := startCamera(t, ptpiptest.Options{Dir: card})
 	h := newHarness(t, nil, "", "")
-	// A file joining an existing content does not change the capture-date
-	// list, so only the periodic full relist can find it.
-	h.set("reconcile_interval", "300ms")
 	h.start(cam)
 	defer h.stop()
 	h.waitDone(1)
@@ -636,11 +669,10 @@ func TestCameraReconnect(t *testing.T) {
 	h.waitDone(4)
 	n := h.p.Metrics.Reconciles.Load()
 	cam.DropConnections()
-	waitFor(t, "second session", func() bool { return h.sup.Sessions() >= 2 })
 	put(t, card, "slot1/DCIM/100MSDCF/DSC00003.JPG", jpeg("3", 1000), shot.Add(time.Hour))
 	h.waitDone(5)
 	if h.p.Metrics.Reconciles.Load() <= n {
-		t.Error("no relist after reconnect")
+		t.Error("no new listing after reconnect")
 	}
 }
 
@@ -661,5 +693,73 @@ func TestCurrentTransferIsReported(t *testing.T) {
 	tr.add(50)
 	if s := tr.snapshot(); s.Percent != 25 || s.Done != 50 || s.Size != 200 {
 		t.Errorf("%+v", s)
+	}
+}
+
+func (h *harness) waitSyncEnd() {
+	h.t.Helper()
+	waitFor(h.t, "sync to end", func() bool { return !h.p.syncing.Load() })
+}
+
+func (h *harness) lastResult() string {
+	h.p.mu.Lock()
+	defer h.p.mu.Unlock()
+	return h.p.lastResult
+}
+
+func TestNoCameraAccessWithoutSync(t *testing.T) {
+	cam := startCamera(t, ptpiptest.Options{Dir: sampleCard(t)})
+	h := newHarness(t, nil, "", "")
+	h.start(cam)
+	defer h.stop()
+	time.Sleep(300 * time.Millisecond)
+	if n := cam.Ops.Load(); n != 0 {
+		t.Errorf("%d camera operations without a sync", n)
+	}
+	if h.sup.Status().Connected || h.sup.Sessions() != 0 {
+		t.Error("connected without a sync")
+	}
+	if n := h.counts()[store.StatusPending]; n != 0 {
+		t.Errorf("%d files listed without a sync", n)
+	}
+}
+
+func TestSyncConnectsTransfersAndReleases(t *testing.T) {
+	cam := startCamera(t, ptpiptest.Options{Dir: sampleCard(t)})
+	h := newHarness(t, nil, "", "")
+	h.linger = 200 * time.Millisecond
+	h.start(cam)
+	defer h.stop()
+	if !h.p.StartSync() || h.p.StartSync() {
+		t.Fatal("second request while one is pending must be refused")
+	}
+	h.waitCounts(map[store.Status]int{store.StatusDone: 4})
+	h.waitSyncEnd()
+	if len(h.srv.Assets()) != 4 || h.sup.Sessions() != 1 {
+		t.Errorf("assets=%d sessions=%d", len(h.srv.Assets()), h.sup.Sessions())
+	}
+	if got := h.lastResult(); !strings.HasPrefix(got, "4 new, 4 downloaded") {
+		t.Errorf("result = %q", got)
+	}
+	waitFor(t, "session to close after the linger time", func() bool { return !h.sup.Status().Connected })
+}
+
+func TestCardUnavailableEndsSyncOnce(t *testing.T) {
+	cam := startCamera(t, ptpiptest.Options{Dir: sampleCard(t), CardBusy: true})
+	h := newHarness(t, nil, "", "")
+	h.start(cam)
+	defer h.stop()
+	h.p.StartSync()
+	waitFor(t, "result", func() bool { return h.lastResult() != "" })
+	if got := h.lastResult(); got != cardUnavailableMsg {
+		t.Errorf("result = %q", got)
+	}
+	ops := cam.Ops.Load()
+	time.Sleep(300 * time.Millisecond)
+	if n := cam.Ops.Load(); n != ops {
+		t.Errorf("camera still being asked: %d -> %d operations", ops, n)
+	}
+	if c := h.counts(); c[store.StatusPending] != 0 {
+		t.Errorf("counts = %v", c)
 	}
 }

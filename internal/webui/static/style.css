@@ -99,3 +99,9 @@ progress{width:100%}
 .d-caution{color:var(--wait)}.d-danger{color:var(--bad)}
 .badge.d-caution{border:1px solid var(--wait)}.badge.d-danger{border:1px solid var(--bad)}
 .p-note{margin:0 0 6px}
+.g-card{position:relative}
+.g-open{display:block;width:100%;padding:0;border:0;border-radius:0;background:none}
+.g-sel{position:absolute;top:6px;left:6px;width:22px;height:22px;margin:0}
+.g-card.sel{outline:2px solid var(--accent)}
+.g-card img.missing{visibility:hidden}
+.sel-bar{margin:10px 0}

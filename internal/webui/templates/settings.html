@@ -15,6 +15,19 @@
 <label for="keepalive">Property poll interval</label><input id="keepalive" name="keepalive" value="{{.V.Keepalive}}" placeholder="10s"{{if .Lock.keepalive}} disabled{{end}}>
 <p class="muted">How often the idle session asks the camera for changed properties. 0 = no requests of our own after connecting (use this to test whether they upset the camera).</p>
 <label class="check"><input type="checkbox" name="debug_log" value="1"{{if .V.DebugLog}} checked{{end}}> Log every camera operation with its duration (debug)</label></section>
+<section class="card"><h2>Export to folder</h2>
+<p class="muted">Where the gallery's "Pull selected" puts the originals. Fields set by environment variables are locked.</p>
+<label for="export_dir">Target folder</label><input id="export_dir" name="export_dir" value="{{.E.Dir}}"{{if .Lock.export_dir}} disabled{{end}}>
+<p class="muted">Created on the first pull. In Docker this is the mounted <code>/library</code>. <code>LIBRARY_DIR</code></p>
+<label for="export_template">Path template</label><input id="export_template" name="export_template" value="{{.E.Template}}"{{if .Lock.export_template}} disabled{{end}}>
+<p class="muted">Example: <code>{{.Example}}</code> (an ARW file of 2025-03-07 09:05:02). <code>/</code> makes folders. Tokens: <code>{camera}</code> <code>{serial}</code> <code>{slot}</code> <code>{year}</code> <code>{month}</code> <code>{day}</code> <code>{hour}</code> <code>{minute}</code> <code>{second}</code> <code>{date}</code> (the camera's clock) <code>{folder}</code> (e.g. 100MSDCF) <code>{name}</code> <code>{ext}</code> <code>{type}</code> (JPEG, HEIF, RAW, VIDEO, OTHER) <code>{seq}</code> (running number of the pull). Needs <code>{name}</code> or <code>{seq}</code>. <code>EXPORT_PATH_TEMPLATE</code></p>
+<label for="export_case">File name case</label><select id="export_case" name="export_case"{{if .Lock.export_case}} disabled{{end}}>{{range .Cases}}<option{{if eq . $.E.Case}} selected{{end}}>{{.}}</option>{{end}}</select>
+<label>File types to export</label><div class="checks"><input type="hidden" name="export_types_present" value="1">{{range .Types}}<label class="check"><input type="checkbox" name="export_types" value="{{.}}"{{if $.E.Wants .}} checked{{end}}{{if $.Lock.export_types}} disabled{{end}}> {{.}}</label>{{end}}</div>
+<label for="export_conflict">If the file exists</label><select id="export_conflict" name="export_conflict"{{if .Lock.export_conflict}} disabled{{end}}>
+<option value="suffix"{{if eq .E.Conflict "suffix"}} selected{{end}}>skip if the size is the same, otherwise add _1, _2 ...</option>
+<option value="always-suffix"{{if eq .E.Conflict "always-suffix"}} selected{{end}}>always add _1, _2 ...</option>
+<option value="overwrite"{{if eq .E.Conflict "overwrite"}} selected{{end}}>overwrite</option></select>
+<input type="hidden" name="export_mtime_present" value="1"><label class="check"><input type="checkbox" name="export_mtime" value="1"{{if .E.SetMtime}} checked{{end}}{{if .Lock.export_mtime}} disabled{{end}}> Set the file's modification time to the capture time</label></section>
 {{range .Plugins}}<section class="card"><h2>{{.Title}}</h2>
 {{range .Fields}}{{if eq .Type "checkbox"}}<input type="hidden" name="{{.Input}}.present" value="1">
 <label class="check"><input id="{{.Input}}" name="{{.Input}}" type="checkbox" value="true"{{if .Checked}} checked{{end}}{{if .Locked}} disabled{{end}}> {{.Label}}</label>

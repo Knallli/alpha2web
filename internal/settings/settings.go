@@ -22,6 +22,13 @@ type Values struct {
 	Keepalive string `json:"keepalive,omitempty"`
 	// DebugLog logs every camera operation with its duration.
 	DebugLog bool `json:"debug_log,omitempty"`
+	// Gallery export; empty = default (see internal/export).
+	ExportDir      string `json:"export_dir,omitempty"`
+	ExportTemplate string `json:"export_template,omitempty"`
+	ExportCase     string `json:"export_case,omitempty"`
+	ExportTypes    string `json:"export_types,omitempty"` // comma list
+	ExportConflict string `json:"export_conflict,omitempty"`
+	ExportMtime    string `json:"export_mtime,omitempty"` // "true"/"false"
 	// Plugins holds each plugin's own key/value settings, by plugin name.
 	Plugins map[string]map[string]string `json:"plugins,omitempty"`
 }

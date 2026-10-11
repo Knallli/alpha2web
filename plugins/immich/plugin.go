@@ -14,7 +14,7 @@ import (
 
 func init() { plugin.Register(&Plugin{}) }
 
-// Plugin downloads everything on the camera's cards and uploads it to Immich.
+// Plugin downloads new files from the camera's cards on request and uploads them to Immich.
 type Plugin struct {
 	pipe atomic.Pointer[pipeline]
 }
@@ -45,8 +45,6 @@ func (*Plugin) Fields() []plugin.Field {
 		{Key: "skip_extensions", Label: "Skip extensions", Default: ".XML,.THM", Group: groupFiles, Env: "SKIP_EXTENSIONS", Help: `"none" skips nothing`},
 
 		{Key: "upload_concurrency", Label: "Parallel uploads", Kind: plugin.FieldInt, Default: "2", Group: groupTransfer, Env: "UPLOAD_CONCURRENCY"},
-		{Key: "reconcile_interval", Label: "Full relist of the cards every", Kind: plugin.FieldDuration, Default: "10m", Group: groupTransfer, Env: "RECONCILE_INTERVAL",
-			Help: "new shots are also noticed by a cheap check once a minute"},
 		{Key: "stall_timeout", Label: "Abort a download without data after", Kind: plugin.FieldDuration, Default: "3m", Group: groupTransfer, Env: "DOWNLOAD_STALL_TIMEOUT"},
 		{Key: "min_free_space_mb", Label: "Pause downloads below free space (MB)", Kind: plugin.FieldInt, Default: "1024", Group: groupTransfer, Env: "MIN_FREE_SPACE_MB"},
 		{Key: "retry_base_delay", Label: "First retry delay", Kind: plugin.FieldDuration, Default: "5s", Group: groupTransfer, Env: "RETRY_BASE_DELAY"},

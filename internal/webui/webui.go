@@ -11,10 +11,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sync"
 
 	"github.com/knallli/alpha2go/ptpip"
 	"github.com/knallli/alpha2web/internal/camera"
+	"github.com/knallli/alpha2web/internal/export"
 	"github.com/knallli/alpha2web/internal/health"
 	"github.com/knallli/alpha2web/internal/logbuf"
 )
@@ -35,8 +37,9 @@ type Handler struct {
 	Logs     *logbuf.Ring
 	Password string // optional HTTP basic auth password
 	Logger   *slog.Logger
-	Settings *Settings // nil hides the settings page
-	CacheDir string    // thumbnail/preview cache; empty disables caching
+	Settings *Settings            // nil hides the settings page
+	CacheDir string               // thumbnail/preview cache and gallery catalog; empty disables caching
+	Export   func() export.Config // where and how the gallery pulls files; nil = no folder
 
 	Extra func(io.Writer) // optional extra /metrics lines (plugins)
 
@@ -56,7 +59,8 @@ func (h *Handler) pg(title, nav string) page {
 	return page{title, nav, h.Version, h.csrfToken(), h.banner()}
 }
 
-// banner describes a missing camera; it is empty while connected.
+// banner describes a camera that is on its way or lost; it is empty while
+// connected and while idle (not being connected is normal).
 func (h *Handler) banner() string {
 	st := h.Camera.Status()
 	switch {
@@ -66,17 +70,16 @@ func (h *Handler) banner() string {
 		return st.LastDropReason + " Reconnecting…"
 	case st.Reconnecting:
 		return "Camera connection lost. Reconnecting…"
+	case st.Connecting:
+		return "Connecting to the camera…"
 	}
-	return "The camera is not connected."
+	return ""
 }
 
-// client waits briefly for a reconnect so a short drop does not fail the
-// request; a camera that was never there fails at once.
-func (h *Handler) client(r *http.Request) (*ptpip.Client, error) {
-	if !h.Camera.Status().Reconnecting {
-		return h.Camera.Client()
-	}
-	return h.Camera.WaitClient(r.Context(), camera.DefaultWait)
+// use opens the camera session if needed and returns the client; call release
+// when the camera work is done.
+func (h *Handler) use(r *http.Request) (*ptpip.Client, func(), error) {
+	return h.Camera.Acquire(r.Context())
 }
 
 // csrfToken is random per process; every POST form carries it.
@@ -156,6 +159,21 @@ func (h *Handler) mux() *http.ServeMux {
 		m.HandleFunc("GET /settings", h.settingsPage)
 		m.HandleFunc("POST /settings", h.saveSettings)
 	}
+	m.HandleFunc("POST /camera/connect", func(w http.ResponseWriter, r *http.Request) {
+		h.Camera.Connect()
+		if r.FormValue("back") == "control" {
+			http.Redirect(w, r, "/control", http.StatusSeeOther)
+			return
+		}
+		http.Redirect(w, r, "/?msg=Connecting+to+the+camera", http.StatusSeeOther)
+	})
+	m.HandleFunc("POST /camera/disconnect", func(w http.ResponseWriter, r *http.Request) {
+		msg := "Camera disconnected"
+		if err := h.Camera.Disconnect(); err != nil {
+			msg = err.Error()
+		}
+		http.Redirect(w, r, "/?msg="+url.QueryEscape(msg), http.StatusSeeOther)
+	})
 	h.controlRoutes(m)
 	h.filesRoutes(m)
 	h.pluginRoutes(m)
@@ -187,4 +205,11 @@ func (h *Handler) Log() *slog.Logger {
 		return h.Logger
 	}
 	return slog.Default()
+}
+
+func (h *Handler) exportCfg() export.Config {
+	if h.Export != nil {
+		return h.Export()
+	}
+	return export.New("", "", "", "", "", "")
 }

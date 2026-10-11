@@ -1,4 +1,5 @@
-// Package camera keeps one PTP/IP session to the camera alive.
+// Package camera opens a PTP/IP session to the camera on demand and closes it
+// when unused.
 package camera
 
 import (
@@ -27,8 +28,11 @@ import (
 // ErrNotConnected means there is no session right now.
 var ErrNotConnected = errors.New("camera not connected")
 
-// DefaultWait is how long handlers wait for a reconnect before giving up.
-const DefaultWait = 8 * time.Second
+// DefaultLinger is how long an unused session stays open.
+const DefaultLinger = 30 * time.Second
+
+// ConnectTimeout is how long Acquire waits for a session.
+const ConnectTimeout = 60 * time.Second
 
 // minQuick is how long a session must have lived for an immediate retry; a
 // camera that drops us right after the handshake gets the normal backoff.
@@ -51,6 +55,9 @@ type Config struct {
 	// once after connecting; negative leaves the camera completely alone.
 	Keepalive time.Duration
 
+	// Linger is how long an unused session stays open; 0 = DefaultLinger.
+	Linger time.Duration
+
 	// Discovery tunes the network scan (tests; zero values are fine).
 	Discovery discovery.Options
 }
@@ -64,26 +71,39 @@ type Status struct {
 	Since     time.Time
 	LastError string
 
-	Reconnecting   bool      // a session existed earlier in this process and there is none now
+	Connecting     bool      // a session is wanted and there is none yet (attempt pending or about to start)
+	Reconnecting   bool      // a session dropped while wanted and there is none yet
 	Drops          int       // sessions that ended without being asked to
 	LastDropAt     time.Time // zero if never dropped
 	LastDropReason string    // human readable; LastError has the raw error
 }
 
-// Supervisor dials the camera, reconnects with backoff and hands the live
-// client to whoever asks.
+// Supervisor opens a PTP/IP session to the camera on demand and closes it when
+// unused. Users hold a lease (Acquire) while they work; the Connect button
+// keeps the session wanted for the linger time.
 type Supervisor struct {
 	cfg     Config
 	log     *slog.Logger
 	restart backoff.Policy
 
-	mu     sync.Mutex
-	client *ptpip.Client
-	st     Status
-	subs   map[chan Event]struct{}
-	cancel context.CancelFunc // ends the current session
-	wake   chan struct{}      // interrupts the retry wait
-	up     chan struct{}      // closed on the next connect (WaitClient)
+	mu      sync.Mutex
+	client  *ptpip.Client
+	st      Status
+	subs    map[chan Event]struct{}
+	cancel  context.CancelFunc // ends the current session
+	wake    chan struct{}      // Run re-checks wanted
+	cfgWake chan struct{}      // SetConfig: ends the settle/backoff wait
+	up      chan struct{}      // closed on the next connect (Acquire)
+	tried   chan struct{}      // closed (and replaced) when an attempt ends without a session
+	tryErr  error              // error of that attempt
+	stop    error              // why cancel was called (errSettings, errDisconnect)
+
+	users     int       // active leases
+	lastUsed  time.Time // last release
+	holdUntil time.Time // Connect/Extend: keep the session wanted until then
+
+	propsWanted bool          // per session: someone needs the properties
+	propsCh     chan struct{} // closed when propsWanted is set
 
 	props    ptpip.SonyProps
 	sorted   []ptpip.SonyProp // snapshot of props, replaced (never modified) on change
@@ -144,7 +164,8 @@ func (s *Supervisor) publish(e Event) {
 }
 
 func New(cfg Config, restart backoff.Policy, log *slog.Logger) *Supervisor {
-	return &Supervisor{cfg: cfg, restart: restart, log: log, st: Status{Host: cfg.Host}, wake: make(chan struct{}, 1)}
+	return &Supervisor{cfg: cfg, restart: restart, log: log, st: Status{Host: cfg.Host},
+		wake: make(chan struct{}, 1), cfgWake: make(chan struct{}, 1), tried: make(chan struct{})}
 }
 
 // open connects to one address and opens the session.
@@ -234,13 +255,119 @@ func (s *Supervisor) SetConfig(cfg Config) {
 	s.cfg = cfg
 	s.st.Host = cfg.Host
 	cancel := s.cancel
+	if cancel != nil {
+		s.stop = errSettings
+	}
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
+	poke(s.wake)
+	poke(s.cfgWake)
+}
+
+func poke(ch chan struct{}) {
 	select {
-	case s.wake <- struct{}{}:
+	case ch <- struct{}{}:
 	default:
+	}
+}
+
+func (s *Supervisor) lingerLocked() time.Duration { return cmp.Or(s.cfg.Linger, DefaultLinger) }
+
+// wantedLocked says whether anything needs the camera: a lease or a pressed Connect.
+func (s *Supervisor) wantedLocked() bool { return s.users > 0 || time.Now().Before(s.holdUntil) }
+
+// Connect is the Connect button: the session is wanted for the linger time.
+// It does not wait for the connection.
+func (s *Supervisor) Connect() {
+	s.mu.Lock()
+	s.holdUntil = time.Now().Add(s.lingerLocked())
+	s.mu.Unlock()
+	poke(s.wake)
+}
+
+// Extend keeps an open (or opening) session for another linger time; it never
+// opens one. Pages that poll while open call it.
+func (s *Supervisor) Extend() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.client != nil || s.wantedLocked() {
+		if t := time.Now().Add(s.lingerLocked()); t.After(s.holdUntil) {
+			s.holdUntil = t
+		}
+	}
+}
+
+// Disconnect closes the session now instead of after the linger time; it
+// refuses while operations are running.
+func (s *Supervisor) Disconnect() error {
+	s.mu.Lock()
+	s.holdUntil = time.Time{}
+	if s.users > 0 {
+		n := s.users
+		s.mu.Unlock()
+		return fmt.Errorf("camera busy: %d operations running", n)
+	}
+	cancel := s.cancel
+	if cancel != nil {
+		s.stop = errDisconnect
+	}
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	return nil
+}
+
+// Acquire returns the client, opening the session if needed (it waits up to
+// ConnectTimeout, or returns the error of a failed attempt). Call release when
+// done; the session closes after the linger time. The client is only valid
+// while the session lasts.
+func (s *Supervisor) Acquire(ctx context.Context) (*ptpip.Client, func(), error) {
+	s.mu.Lock()
+	s.users++
+	tried := s.tried
+	s.mu.Unlock()
+	poke(s.wake)
+	t := time.NewTimer(ConnectTimeout)
+	defer t.Stop()
+	for {
+		s.mu.Lock()
+		c := s.client
+		if c == nil && s.up == nil {
+			s.up = make(chan struct{})
+		}
+		up := s.up
+		s.mu.Unlock()
+		var err error
+		if c != nil {
+			var once sync.Once
+			return c, func() {
+				once.Do(func() {
+					s.mu.Lock()
+					s.users--
+					s.lastUsed = time.Now()
+					s.mu.Unlock()
+				})
+			}, nil
+		}
+		select {
+		case <-up:
+			continue
+		case <-tried:
+			s.mu.Lock()
+			err = s.tryErr
+			s.mu.Unlock()
+		case <-t.C:
+			err = ErrNotConnected
+		case <-ctx.Done():
+			err = ctx.Err()
+		}
+		s.mu.Lock()
+		s.users--
+		s.mu.Unlock()
+		return nil, nil, err
 	}
 }
 
@@ -248,7 +375,9 @@ func (s *Supervisor) SetConfig(cfg Config) {
 func (s *Supervisor) Status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.st
+	st := s.st
+	st.Connecting = s.client == nil && s.wantedLocked()
+	return st
 }
 
 // Client returns the live client; it is only valid until the session ends.
@@ -261,36 +390,17 @@ func (s *Supervisor) Client() (*ptpip.Client, error) {
 	return s.client, nil
 }
 
-// WaitClient is Client, but waits up to timeout for a reconnect.
-func (s *Supervisor) WaitClient(ctx context.Context, timeout time.Duration) (*ptpip.Client, error) {
-	t := time.NewTimer(timeout)
-	defer t.Stop()
-	for {
-		s.mu.Lock()
-		c := s.client
-		if c == nil && s.up == nil {
-			s.up = make(chan struct{})
-		}
-		up := s.up
-		s.mu.Unlock()
-		if c != nil {
-			return c, nil
-		}
-		select {
-		case <-up:
-		case <-t.C:
-			return nil, ErrNotConnected
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-	}
-}
-
 // Props returns the cached extended properties sorted by code and a version
-// that grows with every change. The slice must not be modified.
+// that grows with every change. The slice must not be modified. Calling it
+// makes the supervisor read the properties of the current session (only the
+// Control page needs them).
 func (s *Supervisor) Props() ([]ptpip.SonyProp, uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.client != nil && !s.propsWanted {
+		s.propsWanted = true
+		close(s.propsCh)
+	}
 	return s.sorted, s.propsVer
 }
 
@@ -332,12 +442,13 @@ func (s *Supervisor) trace(e ptpip.TraceEvent) {
 	}
 }
 
-// maintain fills the property cache and, while the session is otherwise idle,
-// polls changed properties every `every`. A broken connection ends the
+// maintain waits until the properties are wanted (Props), fills the property
+// cache and, while the session is otherwise idle, polls changed properties
+// every `every`. A broken connection ends the
 // session by itself (c.Done); answers like "not supported" only end the poll.
 // The context must not be given a timeout: a cancelled transaction tears the
 // connection down, and a busy client is not a problem.
-func (s *Supervisor) maintain(ctx context.Context, c *ptpip.Client, every time.Duration, nudge <-chan struct{}) {
+func (s *Supervisor) maintain(ctx context.Context, c *ptpip.Client, every time.Duration, wanted, nudge <-chan struct{}) {
 	if every < 0 { // CAMERA_KEEPALIVE=0: no traffic of our own after the handshake
 		return
 	}
@@ -348,6 +459,13 @@ func (s *Supervisor) maintain(ctx context.Context, c *ptpip.Client, every time.D
 			return
 		}
 		s.mergeProps(ps)
+	}
+	select { // a gallery refresh must not cause property traffic
+	case <-ctx.Done():
+		return
+	case <-c.Done():
+		return
+	case <-wanted:
 	}
 	refresh(false)
 	var tick <-chan time.Time
@@ -387,49 +505,118 @@ func Explain(err error) string {
 	return err.Error()
 }
 
-var errSettings = errors.New("camera settings changed")
+var (
+	errSettings   = errors.New("camera settings changed")
+	errDisconnect = errors.New("camera disconnected on request")
+	errIdle       = errors.New("camera unused")
+)
 
-// Run blocks until ctx is done.
+// await blocks until something wants the camera; false means ctx is done.
+func (s *Supervisor) await(ctx context.Context) bool {
+	for {
+		select { // drain first: the check below sees every change made before it
+		case <-s.wake:
+		default:
+		}
+		s.mu.Lock()
+		w := s.wantedLocked()
+		s.mu.Unlock()
+		if w {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-s.wake:
+		}
+	}
+}
+
+// pause waits d; SetConfig ends it early. False means ctx is done.
+func (s *Supervisor) pause(ctx context.Context, d time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-s.cfgWake:
+	case <-time.After(d):
+	}
+	return true
+}
+
+// Run blocks until ctx is done. It opens a session only while something wants
+// the camera and goes back to waiting when the session ends for good.
 func (s *Supervisor) Run(ctx context.Context) {
 	fails := 0
 	for ctx.Err() == nil {
+		if !s.await(ctx) {
+			return
+		}
 		before := s.sessions.Load()
 		started := time.Now()
 		err := s.session(ctx)
 		if ctx.Err() != nil {
 			return
 		}
-		s.restarts.Add(1)
 		was := s.sessions.Load() != before
-		if !was {
+		switch {
+		case errors.Is(err, errIdle):
+			s.log.Info("camera disconnected (idle)")
+			fails = 0
+			s.mu.Lock()
+			s.st.Reconnecting = false
+			s.mu.Unlock()
+		case errors.Is(err, errSettings), errors.Is(err, errDisconnect):
+			s.log.Info("camera session closed", "reason", err)
+			fails = 0
+		case !was:
 			s.failures.Add(1)
-		}
-		s.log.Warn("camera session ended", "err", err)
-		s.mu.Lock()
-		s.st.LastError = err.Error()
-		if was && !errors.Is(err, errSettings) {
+			s.log.Warn("camera connect failed", "err", err)
+			s.mu.Lock()
+			s.st.LastError = err.Error()
+			s.holdUntil = time.Time{} // a failed button press must not retry forever
+			s.tryErr = err
+			close(s.tried)
+			s.tried = make(chan struct{})
+			again := s.users > 0
+			s.st.Reconnecting = s.st.Reconnecting && again
+			s.mu.Unlock()
+			if !again {
+				fails = 0
+				continue
+			}
+			fails++
+			s.restarts.Add(1)
+			if !s.pause(ctx, s.restart.Delay(fails)) {
+				return
+			}
+		default:
+			s.log.Warn("camera session ended", "err", err)
+			s.mu.Lock()
+			s.st.LastError = err.Error()
 			s.st.Drops++
 			s.st.LastDropAt = time.Now()
 			s.st.LastDropReason = Explain(err)
-		}
-		s.mu.Unlock()
-		if was && time.Since(started) >= minQuick {
-			fails = 0 // a session that worked: try again soon, backoff only if that fails
-			select {
-			case <-ctx.Done():
-				return
-			case <-s.wake:
-			case <-time.After(settle):
+			again := s.wantedLocked()
+			s.st.Reconnecting = again
+			s.mu.Unlock()
+			if !again {
+				fails = 0
+				continue
 			}
-			continue
-		}
-		fails++
-		select {
-		case <-ctx.Done():
-			return
-		case <-s.wake:
-			fails = 0
-		case <-time.After(s.restart.Delay(fails)):
+			s.restarts.Add(1)
+			d := settle
+			if time.Since(started) < minQuick {
+				fails++ // dropped right after the handshake: normal backoff
+				d = s.restart.Delay(fails)
+			} else {
+				fails = 0
+			}
+			if !s.pause(ctx, d) {
+				return
+			}
+			s.mu.Lock()
+			s.st.Reconnecting = s.wantedLocked() // gave up while waiting
+			s.mu.Unlock()
 		}
 	}
 }
@@ -439,8 +626,22 @@ func (s *Supervisor) session(parent context.Context) error {
 	defer cancel()
 	s.mu.Lock()
 	cfg := s.cfg
-	s.cancel = cancel
+	s.cancel, s.stop = cancel, nil
 	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.cancel = nil
+		s.mu.Unlock()
+	}()
+	// a cancel from SetConfig/Disconnect during the attempt is not a failure
+	ended := func(err error) error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if ctx.Err() != nil && parent.Err() == nil && s.stop != nil {
+			return s.stop
+		}
+		return err
+	}
 
 	var d *ptpip.SSHDialer
 	opts := ptpip.Options{Name: "alpha2web", GUID: guid(cfg.DataDir), Trace: s.trace}
@@ -451,7 +652,7 @@ func (s *Supervisor) session(parent context.Context) error {
 	}
 	hosts, err := s.candidates(ctx, cfg)
 	if err != nil {
-		return err
+		return ended(err)
 	}
 	var c *ptpip.Client
 	var di *ptpip.DeviceInfo
@@ -466,7 +667,7 @@ func (s *Supervisor) session(parent context.Context) error {
 		}
 	}
 	if c == nil {
-		return err
+		return ended(err)
 	}
 	defer func() {
 		// End the PTP session properly when we can: a camera that only sees the
@@ -485,6 +686,9 @@ func (s *Supervisor) session(parent context.Context) error {
 	}
 	s.mu.Lock()
 	s.client = c
+	s.lastUsed = time.Now()
+	s.propsWanted, s.propsCh = false, make(chan struct{})
+	propsCh := s.propsCh
 	s.st.Connected, s.st.Reconnecting, s.st.Model, s.st.Serial, s.st.Host, s.st.Since = true, false, di.Model, di.SerialNumber, cfg.Host, time.Now()
 	s.st.LastError = ""
 	if s.up != nil {
@@ -499,7 +703,8 @@ func (s *Supervisor) session(parent context.Context) error {
 	defer func() {
 		s.mu.Lock()
 		s.client = nil
-		s.st.Connected, s.st.Reconnecting = false, true
+		s.st.Connected = false
+		s.propsWanted = false
 		s.props, s.sorted = nil, nil
 		s.propsVer++
 		s.mu.Unlock()
@@ -508,15 +713,27 @@ func (s *Supervisor) session(parent context.Context) error {
 
 	nudge := make(chan struct{}, 1)
 	if di.IsSony() {
-		go s.maintain(ctx, c, cfg.Keepalive, nudge)
+		go s.maintain(ctx, c, cfg.Keepalive, propsCh, nudge)
 	}
+	idle := time.NewTicker(time.Second)
+	defer idle.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			if parent.Err() == nil {
-				return errSettings
+				return ended(ctx.Err())
 			}
 			return ctx.Err()
+		case <-idle.C:
+			s.mu.Lock()
+			done := s.users == 0 && !time.Now().Before(s.lastUsed.Add(s.lingerLocked())) && !time.Now().Before(s.holdUntil)
+			if done {
+				s.client = nil // Acquire from now on waits for the next session
+			}
+			s.mu.Unlock()
+			if done {
+				return errIdle
+			}
 		case <-c.Done():
 			return c.Err()
 		case e := <-c.Events():

@@ -1,7 +1,10 @@
 {{define "propnote"}}{{if ne .Danger "none"}}<span class="badge d-{{.Danger}}">{{if eq .Danger "danger"}}Danger{{else}}Caution{{end}}</span> <span class="p-note d-{{.Danger}}">{{.Note}}</span>{{end}}{{end}}
 {{- template "header" .}}
 <div id="control" data-csrf="{{.CSRF}}">
-{{if .Msg}}<div class="msg ok">Done: {{.Msg}}</div>{{end}}{{if .Err}}<div class="msg bad">{{.Err}}</div>{{end}}
+{{if .Msg}}<div class="msg ok">Done: {{.Msg}}</div>{{end}}
+<section class="card" id="connect"{{if .Connected}} hidden{{end}}><h2>Camera</h2>
+<p class="muted">The camera is not connected. The settings appear once it is.</p>
+<form method="post" action="/camera/connect"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="back" value="control"><button>Connect</button></form></section>
 <section class="card"><h2>Shutter</h2><div class="actions">
 <form method="post" action="/actions/capture" data-act><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary">Capture (manual focus)</button></form>
 <form method="post" action="/actions/capture" data-act><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="af" value="1"><button>Capture with autofocus</button></form>

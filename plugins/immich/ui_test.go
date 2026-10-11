@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/knallli/alpha2go/ptpip/ptpiptest"
 	"github.com/knallli/alpha2web/internal/backoff"
@@ -27,7 +28,7 @@ func startPlugin(t *testing.T, cfg map[string]string) *Plugin {
 		t.Fatal(err)
 	}
 	t.Cleanup(cam.Close)
-	sup := camera.New(camera.Config{Host: cam.Addr()}, backoff.Default, slog.Default())
+	sup := camera.New(camera.Config{Host: cam.Addr(), Linger: time.Hour}, backoff.Default, slog.Default())
 	ctx, cancel := context.WithCancel(context.Background())
 	go sup.Run(ctx)
 	t.Setenv("STAGING_DIR", t.TempDir())
@@ -43,6 +44,14 @@ func startPlugin(t *testing.T, cfg map[string]string) *Plugin {
 	return p
 }
 
+// syncNow presses the sync button.
+func syncNow(t *testing.T, p *Plugin) {
+	t.Helper()
+	if msg, err := p.Do(context.Background(), "sync"); err != nil || msg != "Sync started." {
+		t.Fatal(msg, err)
+	}
+}
+
 func TestUIAfterUpload(t *testing.T) {
 	im := immichtest.New(t)
 	p := startPlugin(t, map[string]string{"url": im.URL, "api_key": im.APIKey})
@@ -54,10 +63,15 @@ func TestUIAfterUpload(t *testing.T) {
 		}
 		return m
 	}
+	syncNow(t, p)
 	waitFor(t, "done", func() bool { return counts()["Done"] == 1 })
+	waitFor(t, "sync end", func() bool { return !p.pipe.Load().syncing.Load() })
 	st := p.Status(ctx)
 	if st.Title != "Immich" || st.Level != "ok" || st.Headline != "Connected" || st.Notice != "" || len(st.Counts) != 7 || !st.Counts[6].Bad {
 		t.Fatalf("%+v", st)
+	}
+	if last := st.Rows[len(st.Rows)-1]; last.Label != "Last camera sync" || !strings.Contains(last.Value, "1 new, 1 downloaded") {
+		t.Fatalf("%+v", st.Rows)
 	}
 	if st.Rows[1].Link != im.URL || len(st.Recent) != 1 || !strings.Contains(st.Recent[0].Link, "/photos/") {
 		t.Fatalf("%+v", st)
@@ -79,10 +93,8 @@ func TestUIAfterUpload(t *testing.T) {
 		t.Fatal(msg, err)
 	}
 	before := p.pipe.Load().Metrics.Reconciles.Load()
-	if msg, err := p.Do(ctx, "rescan"); err != nil || msg != "Reading the camera cards again." {
-		t.Fatal(msg, err)
-	}
-	waitFor(t, "rescan", func() bool { return p.pipe.Load().Metrics.Reconciles.Load() > before })
+	syncNow(t, p)
+	waitFor(t, "second sync", func() bool { return p.pipe.Load().Metrics.Reconciles.Load() > before })
 	if _, err := p.Do(ctx, "nope"); err == nil {
 		t.Fatal("unknown action accepted")
 	}
@@ -102,9 +114,10 @@ func TestUIAfterUpload(t *testing.T) {
 
 func TestUINotConfigured(t *testing.T) {
 	p := startPlugin(t, nil)
+	syncNow(t, p)
 	waitFor(t, "downloaded", func() bool { return len(p.Files(context.Background(), "downloaded", 10)) == 1 })
 	st := p.Status(context.Background())
-	if st.Level != "wait" || st.Headline != "Not set up" || st.NoticeLink != "/settings" || !strings.Contains(st.Notice, "not connected yet") {
+	if st.Level != "wait" || st.Headline != "Not set up" || st.NoticeLink != "/settings" || !strings.Contains(st.Notice, "not set up yet") {
 		t.Fatalf("%+v", st)
 	}
 	if (&Plugin{}).Status(context.Background()).Headline == "" || (&Plugin{}).Files(context.Background(), "", 5) != nil {
@@ -119,5 +132,40 @@ func TestUIBadKey(t *testing.T) {
 	st := p.Status(context.Background())
 	if st.Headline != "Not reachable" {
 		t.Fatalf("%+v", st)
+	}
+}
+
+func TestImportUploadsAndKeepsLibraryFile(t *testing.T) {
+	im := immichtest.New(t)
+	p := startPlugin(t, map[string]string{"url": im.URL, "api_key": im.APIKey, "delete_local": "true"})
+	data := jpeg("lib", 5000)
+	local := filepath.Join(t.TempDir(), "lib", "DSC00009.JPG")
+	os.MkdirAll(filepath.Dir(local), 0o755)
+	if err := os.WriteFile(local, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lf := plugin.LocalFile{Camera: "ILCE-6700", Slot: 1, Path: "DCIM/100MSDCF/DSC00009.JPG", CapturedAt: shot, Size: int64(len(data)), Local: local}
+	if err := p.Import(context.Background(), []plugin.LocalFile{lf}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "done", func() bool { return len(p.Files(context.Background(), "done", 10)) == 1 })
+	if a := im.Assets(); len(a) != 1 || a[0].Filename != "DSC00009.JPG" {
+		t.Fatalf("%+v", a)
+	}
+	if b, err := os.ReadFile(local); err != nil || len(b) != len(data) {
+		t.Fatalf("library file damaged: %v", err)
+	}
+	if left := stagedFiles(t, os.Getenv("STAGING_DIR")); len(left) != 0 {
+		t.Errorf("staging not cleaned: %v", left)
+	}
+	if err := p.Import(context.Background(), []plugin.LocalFile{lf}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if im.UploadCount() != 1 || p.pipe.Load().Metrics.Downloads.Load() != 1 || len(p.Files(context.Background(), "done", 10)) != 1 {
+		t.Errorf("second import did work: uploads=%d", im.UploadCount())
+	}
+	if _, err := os.Stat(local); err != nil {
+		t.Fatal(err)
 	}
 }

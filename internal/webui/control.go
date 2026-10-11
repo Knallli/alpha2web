@@ -130,30 +130,24 @@ func groupProps(ps []ptpip.SonyProp) []propGroup {
 func (h *Handler) controlPage(w http.ResponseWriter, r *http.Request) {
 	d := struct {
 		page
-		Msg, Err string
-		Groups   []propGroup
+		Msg       string
+		Connected bool
+		Groups    []propGroup
 	}{page: h.pg("Control", "control"), Msg: r.URL.Query().Get("done")}
-	c, err := h.client(r)
-	if err == nil {
-		// the supervisor keeps this list fresh; fetch only before it has one
-		ps, _ := h.Camera.Props()
-		if len(ps) == 0 {
-			if ps, err = c.SonyGetProps(context.WithoutCancel(r.Context()), false); err == nil {
-				slices.SortFunc(ps, func(a, b ptpip.SonyProp) int { return int(a.Code) - int(b.Code) })
-			}
-		}
+	// opening the page must not open a session: show what is there, Connect is a button
+	if d.Connected = h.Camera.Status().Connected; d.Connected {
+		ps, _ := h.Camera.Props() // marks the properties as wanted; the supervisor keeps them fresh
 		d.Groups = groupProps(ps)
-	}
-	if err != nil && !errors.Is(err, camera.ErrNotConnected) { // the banner says that
-		d.Err = camera.Explain(err)
 	}
 	h.render(w, "control.html", d)
 }
 
 // propsJSON serves the cached property list. With ?since=<version> it answers
 // 204 while nothing changed; it never does so while the camera is away, so the
-// page keeps seeing the connection state.
+// page keeps seeing the connection state. The poll keeps an open session open
+// but never opens one.
 func (h *Handler) propsJSON(w http.ResponseWriter, r *http.Request) {
+	h.Camera.Extend()
 	st := h.Camera.Status()
 	ps, ver := h.Camera.Props()
 	if s, err := strconv.ParseUint(r.URL.Query().Get("since"), 10, 64); err == nil && s == ver && st.Connected {
@@ -194,10 +188,13 @@ func failStatus(err error) int {
 // Callers that ask for JSON get {ok, error} instead.
 func (h *Handler) act(name string, fn func(r *http.Request, c *ptpip.Client) error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		c, err := h.client(r)
+		c, release, err := h.use(r)
 		if err == nil {
 			// a cancelled transaction would tear the whole camera session down
-			err = fn(r.WithContext(context.WithoutCancel(r.Context())), c)
+			func() {
+				defer release() // a panic in fn must not keep the camera connected
+				err = fn(r.WithContext(context.WithoutCancel(r.Context())), c)
+			}()
 		}
 		if wantsJSON(r) {
 			w.Header().Set("Content-Type", "application/json")
@@ -215,10 +212,6 @@ func (h *Handler) act(name string, fn func(r *http.Request, c *ptpip.Client) err
 		}
 		if err != nil {
 			http.Error(w, camera.Explain(err), failStatus(err))
-			return
-		}
-		if r.FormValue("back") == "gallery" {
-			http.Redirect(w, r, "/gallery?slot="+strconv.FormatUint(uint64(slotParam(r)), 10)+"&done="+url.QueryEscape(name), http.StatusSeeOther)
 			return
 		}
 		http.Redirect(w, r, "/control?done="+url.QueryEscape(name), http.StatusSeeOther)
@@ -269,11 +262,12 @@ func (h *Handler) setProp(w http.ResponseWriter, r *http.Request) {
 		reply(http.StatusBadRequest, "The value must be a whole number")
 		return
 	}
-	c, err := h.client(r)
+	c, release, err := h.use(r)
 	if err != nil {
 		reply(failStatus(err), camera.Explain(err))
 		return
 	}
+	defer release()
 	// a cancelled transaction would tear the whole camera session down
 	ctx := context.WithoutCancel(r.Context())
 	p, err := c.SonyGetProp(ctx, uint16(code))

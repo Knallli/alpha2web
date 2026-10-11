@@ -1,6 +1,7 @@
 package camera
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -27,10 +28,11 @@ func TestReconnect(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer srv.Close()
-	s := New(Config{Host: srv.Addr()}, backoff.Policy{Base: 20 * time.Millisecond, Max: 50 * time.Millisecond}, slog.Default())
+	s := New(Config{Host: srv.Addr(), Linger: time.Hour}, backoff.Policy{Base: 20 * time.Millisecond, Max: 50 * time.Millisecond}, slog.Default())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go s.Run(ctx)
+	s.Connect()
 
 	wait := func(want bool) {
 		t.Helper()
@@ -57,7 +59,7 @@ func TestReconnect(t *testing.T) {
 	}
 }
 
-func TestFailureCounter(t *testing.T) {
+func TestFailureNoRetry(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -68,14 +70,14 @@ func TestFailureCounter(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go s.Run(ctx)
-	for i := 0; s.Failures() < 2; i++ {
-		if i > 200 {
-			t.Fatal("no failures counted")
-		}
-		time.Sleep(20 * time.Millisecond)
+	t0 := time.Now()
+	if _, _, err := s.Acquire(ctx); err == nil || time.Since(t0) > 5*time.Second {
+		t.Fatalf("want a prompt error, got %v after %v", err, time.Since(t0))
 	}
-	if s.Sessions() != 0 || s.MAC() != "aa:bb:cc:dd:ee:ff" {
-		t.Fatal(s.Sessions(), s.MAC())
+	// nothing wants the camera any more: no second attempt
+	time.Sleep(300 * time.Millisecond)
+	if st := s.Status(); s.Failures() != 1 || s.Sessions() != 0 || s.MAC() != "aa:bb:cc:dd:ee:ff" || st.Connecting || st.LastError == "" {
+		t.Fatalf("failures %d sessions %d %+v", s.Failures(), s.Sessions(), st)
 	}
 }
 
@@ -85,12 +87,13 @@ func TestSubscribe(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer srv.Close()
-	s := New(Config{Host: srv.Addr()}, backoff.Default, slog.Default())
+	s := New(Config{Host: srv.Addr(), Linger: time.Hour}, backoff.Default, slog.Default())
 	ch, stop := s.Subscribe()
 	defer stop()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go s.Run(ctx)
+	s.Connect()
 	next := func() Event {
 		select {
 		case e := <-ch:
@@ -114,10 +117,11 @@ func TestSetConfig(t *testing.T) {
 	b, _ := ptpiptest.Start(ptpiptest.Options{Dir: t.TempDir(), A6700: true, Model: "ILCE-7M4"})
 	defer a.Close()
 	defer b.Close()
-	s := New(Config{}, backoff.Policy{Base: time.Hour, Max: time.Hour}, slog.Default())
+	s := New(Config{Linger: time.Hour}, backoff.Policy{Base: time.Hour, Max: time.Hour}, slog.Default())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go s.Run(ctx)
+	s.Connect()
 	for _, c := range []struct{ addr, model string }{{a.Addr(), "ILCE-6700"}, {b.Addr(), "ILCE-7M4"}} {
 		time.Sleep(50 * time.Millisecond)
 		s.SetConfig(Config{Host: c.addr})
@@ -142,13 +146,14 @@ func TestDiscovery(t *testing.T) {
 	_, portStr, _ := net.SplitHostPort(srv.Addr())
 	port, _ := strconv.Atoi(portStr)
 	dir := t.TempDir()
-	cfg := Config{DataDir: dir, Discovery: discovery.Options{
+	cfg := Config{DataDir: dir, Linger: time.Hour, Discovery: discovery.Options{
 		Port: port, SSDPAddr: "-", Subnets: []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")},
 	}}
 	s := New(cfg, backoff.Policy{Base: 20 * time.Millisecond, Max: 50 * time.Millisecond}, slog.Default())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go s.Run(ctx)
+	s.Connect()
 	for i := 0; !s.Status().Connected; i++ {
 		if i > 300 {
 			t.Fatalf("not found: %+v", s.Status())
@@ -171,6 +176,7 @@ func startSup(t *testing.T, cfg Config, p backoff.Policy) (*Supervisor, *ptpipte
 	}
 	t.Cleanup(srv.Close)
 	cfg.Host = srv.Addr()
+	cfg.Linger = cmp.Or(cfg.Linger, time.Hour)
 	s := New(cfg, p, slog.Default())
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -192,6 +198,7 @@ func until(t *testing.T, what string, ok func() bool) {
 func TestQuickReconnect(t *testing.T) {
 	// A long backoff proves the retry after an established session does not wait for it.
 	s, srv := startSup(t, Config{}, backoff.Policy{Base: time.Hour, Max: time.Hour})
+	s.Connect()
 	until(t, "connect", func() bool { return s.Status().Connected })
 	time.Sleep(minQuick + 100*time.Millisecond)
 	t0 := time.Now()
@@ -212,6 +219,7 @@ func TestReconnectingFlag(t *testing.T) {
 	if s.Status().Reconnecting {
 		t.Fatal("reconnecting before the first connect")
 	}
+	s.Connect()
 	until(t, "connect", func() bool { return s.Status().Connected })
 	srv.Close() // nobody answers anymore
 	until(t, "reconnecting", func() bool { st := s.Status(); return !st.Connected && st.Reconnecting && st.Drops == 1 })
@@ -236,32 +244,11 @@ func TestExplain(t *testing.T) {
 	}
 }
 
-func TestWaitClient(t *testing.T) {
-	srv, err := ptpiptest.Start(ptpiptest.Options{Dir: t.TempDir(), A6700: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer srv.Close()
-	s := New(Config{Host: srv.Addr()}, backoff.Default, slog.Default())
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	t0 := time.Now()
-	if _, err := s.WaitClient(ctx, 100*time.Millisecond); !errors.Is(err, ErrNotConnected) || time.Since(t0) < 90*time.Millisecond {
-		t.Fatalf("want a timeout, got %v after %v", err, time.Since(t0))
-	}
-	go func() { time.Sleep(150 * time.Millisecond); s.Run(ctx) }()
-	c, err := s.WaitClient(ctx, 5*time.Second)
-	if err != nil || c == nil {
-		t.Fatal(c, err)
-	}
-	if c2, err := s.WaitClient(ctx, 0); err != nil || c2 != c {
-		t.Fatal("connected client must be returned at once")
-	}
-}
-
 func TestKeepalive(t *testing.T) {
 	s, srv := startSup(t, Config{Keepalive: 30 * time.Millisecond}, backoff.Policy{Base: 20 * time.Millisecond, Max: 50 * time.Millisecond})
+	s.Connect()
 	until(t, "connect", func() bool { return s.Status().Connected })
+	s.Props() // the properties are only read once somebody wants them
 	n := srv.Ops.Load()
 	until(t, "idle polls", func() bool { return srv.Ops.Load() >= n+3 })
 	// A broken connection ends the session; the keepalive must not hold on to it.
@@ -271,6 +258,8 @@ func TestKeepalive(t *testing.T) {
 
 func TestPropCache(t *testing.T) {
 	s, _ := startSup(t, Config{}, backoff.Default) // no keepalive: only events refresh
+	s.Connect()
+	until(t, "connect", func() bool { return s.Status().Connected })
 	until(t, "props", func() bool { ps, _ := s.Props(); return len(ps) >= 3 })
 	ps, v := s.Props()
 	cur := func(code uint16) int64 {
@@ -306,5 +295,78 @@ func TestPropCache(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatal("no props event")
 		}
+	}
+}
+
+func TestRunAloneNeverDials(t *testing.T) {
+	_, srv := startSup(t, Config{}, backoff.Default)
+	time.Sleep(200 * time.Millisecond)
+	if n := srv.Ops.Load(); n != 0 {
+		t.Fatalf("%d operations without anybody wanting the camera", n)
+	}
+}
+
+func TestAcquireIdleDisconnect(t *testing.T) {
+	s, _ := startSup(t, Config{Linger: 100 * time.Millisecond}, backoff.Default)
+	c, release, err := s.Acquire(context.Background())
+	if err != nil || c == nil {
+		t.Fatal(c, err)
+	}
+	if st := s.Status(); !st.Connected || st.Connecting {
+		t.Fatalf("%+v", st)
+	}
+	time.Sleep(1500 * time.Millisecond) // a lease keeps the session open
+	if !s.Status().Connected {
+		t.Fatal("closed while leased")
+	}
+	release()
+	release() // idempotent
+	until(t, "idle disconnect", func() bool { return !s.Status().Connected })
+	if st := s.Status(); st.Drops != 0 || st.Reconnecting || st.Connecting || s.Failures() != 0 {
+		t.Fatalf("%+v", st)
+	}
+	// the next use opens a new session
+	if _, release, err = s.Acquire(context.Background()); err != nil || s.Sessions() != 2 {
+		t.Fatal(err, s.Sessions())
+	}
+	release()
+}
+
+func TestNoPropsUntilWanted(t *testing.T) {
+	s, srv := startSup(t, Config{Keepalive: 30 * time.Millisecond}, backoff.Default)
+	_, release, err := s.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	time.Sleep(300 * time.Millisecond)
+	n := srv.Ops.Load()
+	if ps, _ := s.Props(); len(ps) != 0 { // this call is the first wish
+		t.Fatal("properties read before they were wanted")
+	}
+	until(t, "props", func() bool { ps, _ := s.Props(); return len(ps) > 0 })
+	until(t, "polls", func() bool { return srv.Ops.Load() >= n+3 })
+}
+
+func TestDisconnect(t *testing.T) {
+	s, _ := startSup(t, Config{}, backoff.Default)
+	_, release, err := s.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Disconnect(); err == nil || !strings.Contains(err.Error(), "busy") {
+		t.Fatalf("want busy, got %v", err)
+	}
+	if !s.Status().Connected {
+		t.Fatal("closed despite the lease")
+	}
+	release()
+	if err := s.Disconnect(); err != nil {
+		t.Fatal(err)
+	}
+	until(t, "disconnect", func() bool { return !s.Status().Connected })
+	time.Sleep(300 * time.Millisecond) // and it stays closed
+	if st := s.Status(); st.Connected || st.Connecting || st.Drops != 0 || s.Sessions() != 1 {
+		t.Fatalf("%+v", st)
 	}
 }

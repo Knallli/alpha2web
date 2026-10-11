@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/knallli/alpha2go/ptpip"
 	"github.com/knallli/alpha2web/internal/camera"
@@ -18,7 +19,25 @@ type Camera interface {
 	Status() camera.Status
 	// Client is only valid while the session lasts.
 	Client() (*ptpip.Client, error)
+	// Acquire opens the session if needed; call release when done, the
+	// session closes after a linger time.
+	Acquire(ctx context.Context) (*ptpip.Client, func(), error)
 	Subscribe() (events <-chan camera.Event, stop func())
+}
+
+// LocalFile is a camera file the gallery copied to local disk.
+type LocalFile struct {
+	Camera     string // camera model, as in camera.Status.Model
+	Slot       int
+	Path       string    // camera path without drive, e.g. "DCIM/100MSDCF/DSC00001.JPG"
+	CapturedAt time.Time // content creation time (SonyContent.CreatedUTC)
+	Size       int64
+	Local      string // absolute path of the copy; importers must not move or delete it
+}
+
+// Importer is optional: files pulled in the gallery are handed to it.
+type Importer interface {
+	Import(ctx context.Context, files []LocalFile) error
 }
 
 // Field describes one setting of a plugin for the settings page.

@@ -18,7 +18,7 @@ type settings struct {
 	DeleteOnCamera     bool // remove a content from the card once all its files are done
 	Skip               []string
 	Concurrency        int
-	Reconcile, Stall   time.Duration
+	Stall              time.Duration
 	MinFreeBytes       int64
 	Retry              backoff.Policy
 }
@@ -29,7 +29,7 @@ func parseSettings(cfg map[string]string) (settings, error) {
 	s := settings{
 		URL: strings.TrimSpace(cfg["url"]), APIKey: strings.TrimSpace(cfg["api_key"]), Album: strings.TrimSpace(cfg["album"]),
 		Stack: true, DeleteLocal: true, Concurrency: 2,
-		Reconcile: 10 * time.Minute, Stall: 3 * time.Minute, MinFreeBytes: 1024 << 20,
+		Stall: 3 * time.Minute, MinFreeBytes: 1024 << 20,
 		Retry: backoff.Policy{Base: 5 * time.Second, Max: 15 * time.Minute, Jitter: 0.2},
 	}
 	var first error
@@ -77,7 +77,6 @@ func parseSettings(cfg map[string]string) (settings, error) {
 	boolean("stack_raw_jpeg", &s.Stack)
 	boolean("delete_local", &s.DeleteLocal)
 	boolean("delete_on_camera", &s.DeleteOnCamera)
-	dur("reconcile_interval", &s.Reconcile)
 	dur("stall_timeout", &s.Stall)
 	dur("retry_base_delay", &s.Retry.Base)
 	dur("retry_max_delay", &s.Retry.Max)

@@ -25,8 +25,12 @@ services:
     volumes:
       - data:/data   # settings (incl. camera password, API keys), plugin state
       - staging:/staging   # downloaded files until Immich has them; use a big disk or a bind mount
+      - library:/library   # originals pulled in the gallery: <camera>/slot<N>/DCIM/...
+      # To keep them on the host or a NAS share, use a bind mount instead:
+      # - /mnt/nas/photos/sony:/library
     environment:
       STAGING_DIR: /staging
+      LIBRARY_DIR: /library
     stop_grace_period: 30s
     logging:
       driver: json-file
@@ -37,3 +41,4 @@ services:
 volumes:
   data:
   staging:
+  library:

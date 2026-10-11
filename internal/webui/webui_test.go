@@ -14,6 +14,7 @@ import (
 
 	"github.com/knallli/alpha2web/internal/backoff"
 	"github.com/knallli/alpha2web/internal/camera"
+	"github.com/knallli/alpha2web/internal/export"
 	"github.com/knallli/alpha2web/internal/logbuf"
 )
 
@@ -32,7 +33,7 @@ func TestPages(t *testing.T) {
 	if get("/", false).Code != http.StatusUnauthorized {
 		t.Fatal("want 401")
 	}
-	for path, want := range map[string]string{"/": "Searching", "/logs": "Logs", "/fragment/logs": "No log entries", "/static/style.css": "--bg"} {
+	for path, want := range map[string]string{"/": "Not connected — connects when needed", "/logs": "Logs", "/fragment/logs": "No log entries", "/static/style.css": "--bg"} {
 		w := get(path, true)
 		if w.Code != 200 || !strings.Contains(w.Body.String(), want) {
 			t.Errorf("%s: %d %q", path, w.Code, w.Body.String())
@@ -41,8 +42,8 @@ func TestPages(t *testing.T) {
 	if w := get("/healthz", false); w.Code != 200 || !strings.Contains(w.Body.String(), "connected=false") {
 		t.Fatal("healthz must be open and 200 without camera")
 	}
-	if w := get("/health", false); w.Code != 200 || !strings.Contains(w.Body.String(), `"degraded"`) {
-		t.Fatal("health must be open", w.Code)
+	if w := get("/health", false); w.Code != 200 || !strings.Contains(w.Body.String(), `"ok"`) {
+		t.Fatal("health must be open and ok while idle", w.Code)
 	}
 	if w := get("/metrics", false); w.Code != 200 || !strings.Contains(w.Body.String(), "alpha2web_camera_connected 0") {
 		t.Fatal("metrics must be open", w.Code)
@@ -101,7 +102,10 @@ func TestNoInlineCode(t *testing.T) {
 }
 
 func TestLiveviewNotConnected(t *testing.T) {
-	h := &Handler{Logs: logbuf.NewRing(1), Camera: camera.New(camera.Config{}, backoff.Default, slog.Default())}
+	h := &Handler{Logs: logbuf.NewRing(1), Camera: camera.New(camera.Config{Host: "127.0.0.1:1"}, backoff.Default, slog.Default())}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go h.Camera.Run(ctx)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest("GET", "/liveview.mjpeg", nil))
 	if w.Code != http.StatusServiceUnavailable {
@@ -183,5 +187,63 @@ func TestPluginSettings(t *testing.T) {
 	h.ServeHTTP(w, httptest.NewRequest("GET", "/settings", nil))
 	if !strings.Contains(w.Body.String(), "Plugin: tp") || strings.Contains(w.Body.String(), "s3") {
 		t.Fatal("plugin section missing or secret leaked")
+	}
+}
+
+func TestConnectButtons(t *testing.T) {
+	h := &Handler{Logs: logbuf.NewRing(1), Camera: camera.New(camera.Config{Host: "127.0.0.1:1"}, backoff.Default, slog.Default())}
+	body := func(method, path string, v url.Values) (int, string) {
+		var r *http.Request
+		if method == "POST" {
+			v.Set("csrf", h.csrfToken())
+			r = httptest.NewRequest(method, path, strings.NewReader(v.Encode()))
+			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		} else {
+			r = httptest.NewRequest(method, path, nil)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code, w.Header().Get("Location") + w.Body.String()
+	}
+	if _, b := body("GET", "/", nil); strings.Contains(b, "msg wait") || !strings.Contains(b, "Not connected — connects when needed") || !strings.Contains(b, "Connect</button>") {
+		t.Fatal(b)
+	}
+	if c, loc := body("POST", "/camera/connect", url.Values{"back": {"control"}}); c != http.StatusSeeOther || loc != "/control" {
+		t.Fatal(c, loc)
+	}
+	if _, b := body("GET", "/", nil); !strings.Contains(b, "Connecting to the camera…") || !strings.Contains(b, "Connecting…") {
+		t.Fatal(b)
+	}
+	if c, loc := body("POST", "/camera/disconnect", url.Values{}); c != http.StatusSeeOther || !strings.HasPrefix(loc, "/?msg=") {
+		t.Fatal(c, loc)
+	}
+}
+
+func TestSettingsExport(t *testing.T) {
+	store, _ := settings.Open(filepath.Join(t.TempDir(), "s.json"))
+	h := &Handler{Logs: logbuf.NewRing(1), Camera: camera.New(camera.Config{}, backoff.Default, slog.Default()),
+		Settings: &Settings{Store: store, Locked: func(f string) bool { return f == "export_case" }, Apply: func(settings.Values) {}}}
+	h.Export = func() export.Config {
+		v := store.Get()
+		return export.New(v.ExportDir, v.ExportTemplate, v.ExportCase, v.ExportTypes, v.ExportConflict, v.ExportMtime)
+	}
+	post := func(form url.Values) int { return post(h, "/settings", form).Code }
+	for _, bad := range []string{"{foo}/{name}", "../{name}", "{year}", "/abs/{name}"} {
+		if c := post(url.Values{"export_template": {bad}}); c != http.StatusBadRequest {
+			t.Fatalf("%q accepted: %d", bad, c)
+		}
+	}
+	if c := post(url.Values{"export_template": {"{date}/{name}{ext}"}, "export_case": {"upper"}, "export_types_present": {"1"}, "export_types": {"JPEG", "RAW"}, "export_conflict": {"overwrite"}, "export_mtime_present": {"1"}}); c != http.StatusSeeOther {
+		t.Fatal(c)
+	}
+	v := store.Get()
+	if v.ExportTemplate != "{date}/{name}{ext}" || v.ExportCase != "" || v.ExportTypes != "JPEG,RAW" || v.ExportConflict != "overwrite" || v.ExportMtime != "false" {
+		t.Fatalf("%+v", v)
+	}
+	if c := post(url.Values{"export_types_present": {"1"}}); c != http.StatusBadRequest {
+		t.Fatal("no file type selected must be refused:", c)
+	}
+	if b := get(h, "/settings").Body.String(); !strings.Contains(b, "Export to folder") || !strings.Contains(b, "<code>2025-03-07/DSC01234.ARW</code>") {
+		t.Fatal(b)
 	}
 }
