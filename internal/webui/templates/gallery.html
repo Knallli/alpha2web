@@ -1,18 +1,18 @@
 {{template "header" .}}
-<p class="muted">The camera accepts only one remote connection. Do not use the Sony app (Creators' App / Imaging Edge) at the same time — it blocks alpha2web or drops its session.</p>
+<p class="hint"><svg class="ico"><use href="#i-alert"/></svg><span>The camera accepts only one remote connection. Do not use the Sony app (Creators' App / Imaging Edge) at the same time — it blocks alpha2web or drops its session.</span></p>
 {{if .Msg}}<div class="msg ok">Done: {{.Msg}}</div>{{end}}{{with .Last}}<div class="msg {{if .Err}}bad{{else}}ok{{end}}">{{.Kind}} finished {{ago .Ended}}: {{.Result}} {{.Err}}</div>{{end}}
 <div id="gallery" data-csrf="{{.CSRF}}" data-slot="{{.Slot}}">
-<section id="job" class="card" hidden><h2 id="job-title"></h2><progress id="job-bar"></progress><p id="job-cur" class="muted"></p><button type="button" class="secondary" id="job-stop">Stop</button></section>
+<section id="job" class="card" hidden><h2 id="job-title"></h2><progress id="job-bar"></progress><p id="job-cur" class="muted"></p><button type="button" class="secondary" id="job-stop"><svg class="ico"><use href="#i-x"/></svg>Stop</button></section>
 <div id="job-err" class="msg bad" hidden></div>
-<nav class="tabs"><a href="/gallery?slot=1"{{if eq .Slot 1}} aria-current="page"{{end}}>Slot 1</a><a href="/gallery?slot=2"{{if eq .Slot 2}} aria-current="page"{{end}}>Slot 2</a><span class="muted">{{.Total}} items</span></nav>
-<div class="actions"><button type="button" id="g-refresh">{{if .HasCat}}Refresh from camera{{else}}Load from camera{{end}}</button>
+<nav class="tabs"><a href="/gallery?slot=1"{{if eq .Slot 1}} aria-current="page"{{end}}>Slot 1</a><a href="/gallery?slot=2"{{if eq .Slot 2}} aria-current="page"{{end}}>Slot 2</a></nav><span class="muted">{{.Total}} items</span>
+<div class="actions"><button type="button" id="g-refresh"><svg class="ico"><use href="#i-refresh"/></svg>{{if .HasCat}}Refresh from camera{{else}}Load from camera{{end}}</button>
 <span class="muted">{{if not .Never}}refreshed {{ago .S.Refreshed}}{{end}}</span></div>
 {{if .S.Err}}<div class="msg bad">{{.S.Err}}</div>{{end}}
 {{if .Never}}<p class="muted">Nothing is loaded from the camera yet. "Load from camera" lists the cards and fetches the thumbnails once; after that this page works without the camera.</p>
 {{else if .S.Empty}}<p class="muted">No card in slot {{.Slot}}, or it holds no files.</p>{{end}}
-{{if .Total}}<div class="actions sel-bar"><button type="button" class="secondary" id="g-page">Select page</button><button type="button" class="secondary" id="g-all">Select all in slot ({{.Total}})</button><button type="button" class="secondary" id="g-none">Clear selection</button><button type="button" id="g-pull" disabled>Pull selected (0)</button></div>
-<p class="muted">Pulled originals go to <code>{{if .Library}}{{.Library}}{{else}}(LIBRARY_DIR is not set){{end}}</code>; files already there with the same size are skipped.</p>{{end}}
-<div class="grid">
+{{if .Total}}<div class="actions sel-bar"><button type="button" class="secondary" id="g-page">Select page</button><button type="button" class="secondary" id="g-all">Select all in slot ({{.Total}})</button><button type="button" class="secondary" id="g-none">Clear selection</button><button type="button" id="g-pull" disabled><svg class="ico"><use href="#i-download"/></svg><span>Pull selected (0)</span></button></div>
+<p class="muted">Tip: shift-click a checkbox to select a range. Pulled originals go to <code>{{if .Library}}{{.Library}}{{else}}(LIBRARY_DIR is not set){{end}}</code>; files already there with the same size are skipped.</p>{{end}}
+<div class="g-grid">
 {{range $i, $it := .Items}}<div class="g-card" data-i="{{$i}}"><input type="checkbox" class="g-sel" value="{{$it.Key}}" aria-label="Select">
 <button type="button" class="g-open" data-i="{{$i}}" aria-label="Open original"><img loading="lazy" alt="" src="/gallery/thumb?slot={{$.Slot}}&k={{$it.Key}}"></button>
 <span class="g-meta"><span>{{$it.Created.Format "2006-01-02 15:04"}}</span>
@@ -27,10 +27,11 @@
 <div class="lb-stage"><button type="button" class="lb-nav" id="lb-prev" aria-label="Previous">&lsaquo;</button>
 <div class="lb-img"><img id="lb-img" alt=""><p id="lb-loading" class="muted" hidden>Loading original…</p><p id="lb-missing" class="muted" hidden>No preview available.</p></div>
 <button type="button" class="lb-nav" id="lb-next" aria-label="Next">&rsaquo;</button></div>
-<aside class="lb-panel"><button type="button" class="secondary" id="lb-close">Close</button>
+<aside class="lb-panel"><button type="button" class="secondary" id="lb-close"><svg class="ico"><use href="#i-x"/></svg>Close <kbd>Esc</kbd></button>
+<p class="lb-count" id="lb-count"></p>
 <dl><dt>UTC</dt><dd id="lb-utc"></dd><dt>Local</dt><dd id="lb-local"></dd></dl>
 <ul id="lb-files"></ul>
-<form method="post" action="/gallery/delete" data-confirm="Delete from the card? This cannot be undone."><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="slot" value="{{.Slot}}"><input type="hidden" name="k" id="lb-del-key"><button class="secondary">Delete</button></form>
+<form method="post" action="/gallery/delete" data-confirm="Delete from the card? This cannot be undone."><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="slot" value="{{.Slot}}"><input type="hidden" name="k" id="lb-del-key"><button class="danger"><svg class="ico"><use href="#i-trash"/></svg>Delete from card</button></form>
 </aside></div>
 <script src="/static/gallery.js" defer></script>
 {{template "footer" .}}

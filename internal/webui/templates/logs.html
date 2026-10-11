@@ -1,7 +1,9 @@
 {{template "header" .}}
-<section class="card"><h2>Logs</h2>
+<section class="card">
 <form method="get" action="/logs" class="inline"><label for="lv">Level</label>
-<select id="lv" name="level">{{range .Levels}}<option{{if eq . $.Level}} selected{{end}}>{{.}}</option>{{end}}</select><button class="secondary">Show</button></form>
+<select id="lv" name="level" data-autosubmit>{{range .Levels}}<option{{if eq . $.Level}} selected{{end}}>{{.}}</option>{{end}}</select><button class="secondary">Show</button>
+<input type="search" id="lf" placeholder="Filter lines…" aria-label="Filter log lines" data-filter=".log > div">
+<label class="check"><input type="checkbox" id="lf-follow" checked> Follow</label></form>
 <div class="log" data-refresh="/fragment/logs?level={{.Level}}" data-every="2000" data-scroll="1">{{template "logrows" .Entries}}</div></section>
 {{template "footer" .}}
 

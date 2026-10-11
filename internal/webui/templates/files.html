@@ -2,8 +2,9 @@
 {{if .Msg}}<div class="msg ok">Done: {{.Msg}}</div>{{end}}
 {{range .Tracked}}{{$pl := .}}<section class="card"><h2>Tracked files</h2>
 <form method="get" action="/files" class="inline"><label for="st">Status</label>
-<select id="st" name="status"><option value="">all</option>{{range .Statuses}}<option value="{{.}}"{{if eq . $pl.Filter}} selected{{end}}>{{.}}</option>{{end}}</select><button class="secondary">Filter</button></form>
-{{if .Files}}<div class="scroll"><table><thead><tr><th>File</th><th>Slot</th><th>Captured</th><th>Status</th><th>Size</th><th>Tries</th><th>Updated</th><th>Note</th></tr></thead><tbody>
+<select id="st" name="status" data-autosubmit><option value="">all</option>{{range .Statuses}}<option value="{{.}}"{{if eq . $pl.Filter}} selected{{end}}>{{.}}</option>{{end}}</select><button class="secondary">Filter</button>
+<input type="search" id="ft" placeholder="Search file name…" aria-label="Search file name" data-filter="#files-table tbody tr"></form>
+{{if .Files}}<div class="scroll"><table id="files-table"><thead><tr><th>File</th><th>Slot</th><th>Captured</th><th>Status</th><th>Size</th><th>Tries</th><th>Updated</th><th>Note</th></tr></thead><tbody>
 {{range .Files}}<tr><td title="{{.Path}}">{{if .Link}}<a href="{{.Link}}" target="_blank" rel="noopener">{{if .Name}}{{.Name}}{{else}}{{.Path}}{{end}}</a>{{else if .Name}}{{.Name}}{{else}}{{.Path}}{{end}}</td>
 <td>{{.Slot}}</td><td>{{if not .Captured.IsZero}}{{.Captured.Local.Format "2006-01-02 15:04"}}{{end}}</td><td>{{template "badge" .Status}}</td><td>{{if .Size}}{{bytes .Size}}{{end}}</td>
 <td>{{.Attempts}}</td><td>{{ago .Updated}}</td><td class="err">{{short .Note}}</td></tr>{{end}}

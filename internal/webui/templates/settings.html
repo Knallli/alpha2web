@@ -34,5 +34,5 @@
 {{else}}<label for="{{.Input}}">{{.Label}}{{if and (eq .Type "password") .IsSet}} (set; leave empty to keep){{end}}</label>
 <input id="{{.Input}}" name="{{.Input}}"{{if .Locked}} disabled{{end}} {{if eq .Type "password"}}type="password" autocomplete="new-password"{{else}}value="{{.Value}}"{{end}}{{with .Placeholder}} placeholder="{{.}}"{{else}}{{with .Default}} placeholder="{{.}}"{{end}}{{end}}>
 {{end}}{{if .Locked}}<p class="muted">Set via {{.Env}}</p>{{end}}{{if .Help}}<p class="muted">{{.Help}}</p>{{end}}{{end}}</section>{{end}}
-<p><button>Save</button></p></form>
+<div class="form-bar"><button><svg class="ico"><use href="#i-save"/></svg>Save settings</button></div></form>
 {{template "footer" .}}

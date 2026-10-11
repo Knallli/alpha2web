@@ -1,8 +1,10 @@
 {{template "header" .}}
-<section class="card"><h2>Live view</h2>
-<div class="actions"><button id="live-start">Start live view</button><button id="live-stop" class="secondary" hidden>Stop</button></div>
-<img id="live" alt="Live view" class="live" hidden>
+<section class="card">
+<div class="actions"><button id="live-start"><svg class="ico"><use href="#i-live"/></svg>Start live view</button><button id="live-stop" class="secondary" hidden><svg class="ico"><use href="#i-x"/></svg>Stop</button>
+<button id="live-snap" class="secondary" hidden><svg class="ico"><use href="#i-download"/></svg>Save frame</button>
+<button id="live-full" class="secondary" hidden><svg class="ico"><use href="#i-expand"/></svg>Fullscreen</button></div>
+<div id="live-wrap" class="live-wrap"><img id="live" alt="Live view" class="live" hidden></div>
 <p id="live-status" class="muted" role="status">Press Start to connect to the camera.</p>
-<p class="muted">Only one live-view stream is possible at a time.</p></section>
+<p class="hint"><svg class="ico"><use href="#i-alert"/></svg><span>Only one live-view stream is possible at a time. Close other tabs showing it first.</span></p></section>
 <script src="/static/liveview.js" defer></script>
 {{template "footer" .}}

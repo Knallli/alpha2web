@@ -4,8 +4,8 @@
 {{template "footer" .}}
 
 {{define "status"}}{{range .Plugins}}{{if .Notice}}<div class="msg bad">{{.Notice}}{{if .NoticeLink}} <a href="{{.NoticeLink}}">Set it up</a>{{end}}</div>{{end}}{{end}}
-{{with .Plugins}}{{range .}}{{with .Transfer}}<section class="card"><h2>Downloading</h2>
-<p title="{{.Name}}">{{.Name}}</p>
+{{with .Plugins}}{{range .}}{{with .Transfer}}<section class="card xfer"><h2>Downloading now</h2>
+<p class="xfer-name" title="{{.Name}}">{{.Name}}</p>
 <progress max="100" value="{{.Percent}}"></progress>
 <p class="muted">{{.Percent}} % · {{bytes .Done}}{{if .Size}} of {{bytes .Size}}{{end}}{{if .BytesPerSec}} · {{bytes (int64 .BytesPerSec)}}/s{{end}}{{if .ETA}} · {{.ETA}} left{{end}} · running {{since .Started}}</p></section>{{end}}{{end}}{{end}}
 <div class="grid">
@@ -19,10 +19,10 @@
 <dt>Restarts</dt><dd>{{.Restarts}}</dd></dl>
 {{if .S.LastDropReason}}<p class="muted">{{.S.LastDropReason}}</p>{{end}}
 {{if and .S.LastError (not .S.Connected)}}<p class="muted bad" title="{{.S.LastError}}">{{.S.LastError}}</p>{{end}}
-{{if and .S.LastError (not .S.Connected)}}<p class="muted">Turn the camera on (Wi-Fi + PC Remote).</p>{{end}}
-<div class="actions">{{if .S.Connected}}<form method="post" action="/camera/disconnect"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary">Disconnect</button></form>
-{{else if not (or .S.Connecting .S.Reconnecting)}}<form method="post" action="/camera/connect"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Connect</button></form>{{end}}</div>
-<p class="muted">The camera accepts only one remote connection. Do not use the Sony app (Creators' App / Imaging Edge) at the same time — it blocks alpha2web or drops its session.</p></section>
+{{if and .S.LastError (not .S.Connected)}}<p class="hint"><svg class="ico"><use href="#i-alert"/></svg><span>Turn the camera on and enable Wi-Fi + PC Remote, then press Connect.</span></p>{{end}}
+<div class="actions">{{if .S.Connected}}<form method="post" action="/camera/disconnect"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary"><svg class="ico"><use href="#i-x"/></svg>Disconnect</button></form>
+{{else if not (or .S.Connecting .S.Reconnecting)}}<form method="post" action="/camera/connect"><input type="hidden" name="csrf" value="{{.CSRF}}"><button><svg class="ico"><use href="#i-plug"/></svg>Connect</button></form>{{end}}</div>
+<p class="hint"><svg class="ico"><use href="#i-alert"/></svg><span>The camera accepts only one remote connection. Do not use the Sony app (Creators' App / Imaging Edge) at the same time — it blocks alpha2web or drops its session.</span></p></section>
 {{range .Plugins}}{{if or .Headline .Rows}}<section class="card"><h2>{{.Title}}</h2>
 {{if .Headline}}<p class="big">{{if .Level}}<span class="dot {{cls .Level}}"></span>{{end}}{{.Headline}}</p>{{end}}
 <dl>{{range .Rows}}<dt>{{.Label}}</dt><dd>{{if .Link}}<a href="{{.Link}}" target="_blank" rel="noopener">{{.Value}}</a>{{else}}{{.Value}}{{end}}</dd>{{end}}</dl></section>{{end}}

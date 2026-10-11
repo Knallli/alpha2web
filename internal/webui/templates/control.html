@@ -4,16 +4,16 @@
 {{if .Msg}}<div class="msg ok">Done: {{.Msg}}</div>{{end}}
 <section class="card" id="connect"{{if .Connected}} hidden{{end}}><h2>Camera</h2>
 <p class="muted">The camera is not connected. The settings appear once it is.</p>
-<form method="post" action="/camera/connect"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="back" value="control"><button>Connect</button></form></section>
-<section class="card"><h2>Shutter</h2><div class="actions">
-<form method="post" action="/actions/capture" data-act><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary">Capture (manual focus)</button></form>
-<form method="post" action="/actions/capture" data-act><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="af" value="1"><button>Capture with autofocus</button></form>
-<form method="post" action="/actions/movie" data-act data-confirm="Start or stop movie recording?"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary">Start / stop movie</button></form></div>
+<form method="post" action="/camera/connect"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="back" value="control"><button><svg class="ico"><use href="#i-plug"/></svg>Connect</button></form></section>
+<section class="card"><h2>Shutter</h2><div class="shutter">
+<form method="post" action="/actions/capture" data-act><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary"><svg class="ico"><use href="#i-camera"/></svg>Capture (manual focus)</button></form>
+<form method="post" action="/actions/capture" data-act><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="af" value="1"><button><svg class="ico"><use href="#i-bolt"/></svg>Capture with autofocus</button></form>
+<form method="post" action="/actions/movie" data-act data-confirm="Start or stop movie recording?"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary"><svg class="ico"><use href="#i-rec"/></svg>Start / stop movie</button></form></div>
 <p id="act-status" class="muted" role="status" aria-live="polite"></p></section>
 
 <section class="card" id="toolbar" hidden>
 <h2>Settings</h2>
-<input type="search" id="q" placeholder="Search name, description or code" aria-label="Search settings">
+<input type="search" id="q" placeholder="Search name, description or code…  (press / to focus)" aria-label="Search settings">
 <div class="checks">
 <label class="check"><input type="checkbox" id="f-change"> Only changeable</label>
 <label class="check"><input type="checkbox" id="f-undoc"> Show undocumented</label>
@@ -34,7 +34,7 @@
 {{else}}<input type="number" name="value" value="{{.Current}}" aria-label="{{.Name}}">{{end}}
 {{if not .Documented}}<label class="check"><input type="checkbox" name="unlock" value="1"> I know this is undocumented</label>{{end}}
 {{if eq .Danger "danger"}}<label class="check"><input type="checkbox" name="confirm" value="1"> Confirm</label>{{end}}
-<button class="secondary">Set</button></form>
+<button class="secondary"><svg class="ico"><use href="#i-check"/></svg>Set</button></form>
 {{else}}<div class="p-value">{{.Display}}</div><div class="muted">{{.Disabled}}</div>{{end}}
 </div>{{end}}</section>{{end}}
 </div>

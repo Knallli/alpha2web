@@ -18,11 +18,20 @@
     boxes.forEach((b) => { b.checked = sel.has(b.value); b.closest(".g-card").classList.toggle("sel", b.checked); });
     try { sessionStorage.setItem(skey, JSON.stringify([...sel])); } catch (_) { /* no storage */ }
     if ($("g-pull")) {
-      $("g-pull").textContent = `Pull selected (${sel.size})`;
+      $("g-pull").querySelector("span").textContent = `Pull selected (${sel.size})`;
       $("g-pull").disabled = running || sel.size === 0;
     }
     $("g-refresh").disabled = running;
   };
+  // shift-click selects (or clears) everything between the last clicked box and this one
+  let lastBox = null;
+  boxes.forEach((b) => b.addEventListener("click", (e) => {
+    if (e.shiftKey && lastBox) {
+      const [x, y] = [boxes.indexOf(lastBox), boxes.indexOf(b)].sort((p, q) => p - q);
+      for (let i = x; i <= y; i++) b.checked ? sel.add(boxes[i].value) : sel.delete(boxes[i].value);
+    }
+    lastBox = b;
+  }));
   boxes.forEach((b) => b.addEventListener("change", () => { b.checked ? sel.add(b.value) : sel.delete(b.value); sync(); }));
   const on = (id, fn) => { if ($(id)) $(id).addEventListener("click", fn); };
   on("g-page", () => { boxes.forEach((b) => sel.add(b.value)); sync(); });
@@ -85,6 +94,7 @@
     $("lb-missing").hidden = true;
     $("lb-loading").hidden = false;
     img.hidden = true;
+    img.classList.remove("zoom");
     img.src = `/gallery/preview?slot=${slot}&k=${it.key}`;
     const d = new Date(it.created);
     $("lb-utc").textContent = d.toISOString().replace("T", " ").replace(/\..*/, "") + " UTC";
@@ -101,11 +111,13 @@
       li.append(a, s);
       return li;
     }));
+    $("lb-count").textContent = `${i + 1} / ${items.length} on this page`;
     $("lb-prev").disabled = i === 0;
     $("lb-next").disabled = i === items.length - 1;
   };
   const close = () => { box.hidden = true; img.removeAttribute("src"); cur = -1; };
 
+  img.addEventListener("click", () => img.classList.toggle("zoom")); // click = 100 % / fit
   img.addEventListener("load", () => { img.hidden = false; $("lb-loading").hidden = true; });
   img.addEventListener("error", async () => {
     const u = img.getAttribute("src");

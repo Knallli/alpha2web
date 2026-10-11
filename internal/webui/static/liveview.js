@@ -4,6 +4,8 @@ const img = document.getElementById("live");
 const line = document.getElementById("live-status");
 const startBtn = document.getElementById("live-start");
 const stopBtn = document.getElementById("live-stop");
+const snapBtn = document.getElementById("live-snap");
+const fullBtn = document.getElementById("live-full");
 const idle = "Press Start to connect to the camera.";
 let failed = 0, running = false, retry = 0;
 
@@ -11,6 +13,8 @@ const show = (on) => {
   running = on;
   startBtn.hidden = on;
   stopBtn.hidden = !on;
+  snapBtn.hidden = !on;
+  fullBtn.hidden = !on;
   img.hidden = !on;
 };
 startBtn.addEventListener("click", () => {
@@ -56,3 +60,20 @@ const poll = async () => {
   else line.textContent = "Waiting for frames…";
 };
 setInterval(poll, 1000);
+
+// Save the frame currently shown as a JPEG (the stream is same-origin, so the canvas is not tainted).
+snapBtn.addEventListener("click", () => {
+  if (!img.naturalWidth) return;
+  const c = document.createElement("canvas");
+  c.width = img.naturalWidth;
+  c.height = img.naturalHeight;
+  c.getContext("2d").drawImage(img, 0, 0);
+  c.toBlob((b) => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(b);
+    a.download = "liveview-" + new Date().toISOString().replace(/[:.]/g, "-") + ".jpg";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }, "image/jpeg", 0.92);
+});
+fullBtn.addEventListener("click", () => document.getElementById("live-wrap").requestFullscreen());
