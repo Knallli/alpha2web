@@ -107,7 +107,7 @@ func TestValidateAndFields(t *testing.T) {
 	for _, f := range p.Fields() {
 		kinds[f.Key] = f.Kind
 	}
-	if len(kinds) != 12 || kinds["api_key"] != plugin.FieldSecret || kinds["delete_on_camera"] != plugin.FieldBool ||
+	if len(kinds) != 13 || kinds["delete_library"] != plugin.FieldBool || kinds["api_key"] != plugin.FieldSecret || kinds["delete_on_camera"] != plugin.FieldBool ||
 		kinds["stall_timeout"] != plugin.FieldDuration || kinds["upload_concurrency"] != plugin.FieldInt {
 		t.Errorf("fields: %v", kinds)
 	}

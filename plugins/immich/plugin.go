@@ -39,6 +39,9 @@ func (*Plugin) Fields() []plugin.Field {
 
 		{Key: "delete_local", Label: "Delete the downloaded copy after upload", Kind: plugin.FieldBool, Default: "true", Group: groupFiles,
 			Env: "DELETE_AFTER_UPLOAD", Help: "Delete the local copy after a confirmed upload"},
+		{Key: "delete_library", Label: "Delete the pulled library copy after upload", Kind: plugin.FieldBool, Default: "false", Group: groupFiles,
+			Env:  "DELETE_LIBRARY_AFTER_UPLOAD",
+			Help: "Files pulled in the gallery are also removed from the library folder once they are confirmed in Immich, so they live only there. Independent of deleting from the camera. Off by default."},
 		{Key: "delete_on_camera", Label: "Delete from the camera once uploaded", Kind: plugin.FieldBool, Default: "false", Group: groupFiles,
 			Env:  "IMMICH_DELETE_ON_CAMERA",
 			Help: "Also delete the shot from the camera card after it is confirmed in Immich. Irreversible. Off by default; the old alpha2immich never deleted on the camera."},

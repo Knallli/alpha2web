@@ -15,6 +15,7 @@ type settings struct {
 	URL, APIKey, Album string
 	Stack              bool
 	DeleteLocal        bool // remove the staged copy once the asset is safe in Immich
+	DeleteLibrary      bool // also remove the gallery-pulled library copy once the asset is safe in Immich
 	DeleteOnCamera     bool // remove a content from the card once all its files are done
 	Skip               []string
 	Concurrency        int
@@ -76,6 +77,7 @@ func parseSettings(cfg map[string]string) (settings, error) {
 	}
 	boolean("stack_raw_jpeg", &s.Stack)
 	boolean("delete_local", &s.DeleteLocal)
+	boolean("delete_library", &s.DeleteLibrary)
 	boolean("delete_on_camera", &s.DeleteOnCamera)
 	dur("stall_timeout", &s.Stall)
 	dur("retry_base_delay", &s.Retry.Base)

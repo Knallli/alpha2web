@@ -897,6 +897,31 @@ func (p *pipeline) postProcess(ctx context.Context, im *Client, s settings, file
 		}
 	}
 
+	// 1b. Delete the library copy of gallery imports, if asked to. It is only
+	// removed when it still has the size that was uploaded.
+	if s.DeleteLibrary {
+		for i := range files {
+			f := &files[i]
+			if f.SourcePath == "" {
+				continue
+			}
+			st, err := os.Stat(f.SourcePath)
+			switch {
+			case err == nil && st.Size() == f.Size:
+				if err := os.Remove(f.SourcePath); err != nil {
+					p.log.Warn("delete library file", "path", f.SourcePath, "err", err)
+					continue
+				}
+			case err != nil && !errors.Is(err, os.ErrNotExist):
+				p.log.Warn("stat library file", "path", f.SourcePath, "err", err)
+				continue
+			}
+			if err := p.store.SetSourcePath(db, f.ID, ""); err == nil {
+				f.SourcePath = ""
+			}
+		}
+	}
+
 	// 2. Album.
 	if s.Album == "" {
 		for i := range files {
@@ -921,7 +946,7 @@ func (p *pipeline) postProcess(ctx context.Context, im *Client, s settings, file
 
 	// 4. Finish rows with nothing left to do.
 	for _, f := range files {
-		if (f.LocalDeleted || !s.DeleteLocal) && f.AlbumAdded && f.Stacked {
+		if (f.LocalDeleted || !s.DeleteLocal) && (f.SourcePath == "" || !s.DeleteLibrary) && f.AlbumAdded && f.Stacked {
 			if err := p.store.Done(db, f.ID); err != nil && !errors.Is(err, store.ErrInvalidTransition) {
 				p.log.Error("finish file", "id", f.ID, "err", err)
 			}

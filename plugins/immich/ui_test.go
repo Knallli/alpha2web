@@ -169,3 +169,24 @@ func TestImportUploadsAndKeepsLibraryFile(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestDeleteLibraryRemovesPulledCopyAfterUpload(t *testing.T) {
+	im := immichtest.New(t)
+	p := startPlugin(t, map[string]string{"url": im.URL, "api_key": im.APIKey, "delete_library": "true"})
+	data := jpeg("lib", 5000)
+	local := filepath.Join(t.TempDir(), "DSC00010.JPG")
+	if err := os.WriteFile(local, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lf := plugin.LocalFile{Camera: "ILCE-6700", Slot: 1, Path: "DCIM/100MSDCF/DSC00010.JPG", CapturedAt: shot, Size: int64(len(data)), Local: local}
+	if err := p.Import(context.Background(), []plugin.LocalFile{lf}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "done", func() bool { return len(p.Files(context.Background(), "done", 10)) == 1 })
+	if _, err := os.Stat(local); !os.IsNotExist(err) {
+		t.Fatalf("library copy still there: %v", err)
+	}
+	if a := im.Assets(); len(a) != 1 {
+		t.Fatalf("%+v", a)
+	}
+}

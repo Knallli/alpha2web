@@ -18,7 +18,8 @@ var _ plugin.Importer = (*Plugin)(nil)
 
 // Import queues files the gallery copied to the library for upload. It needs
 // no camera session. The library files are only read (hard-linked or copied
-// into staging), never moved or deleted.
+// into staging) and only deleted when "delete_library" is on, after the upload
+// is confirmed.
 func (p *Plugin) Import(ctx context.Context, files []plugin.LocalFile) error {
 	pl := p.pipe.Load()
 	if pl == nil {
@@ -65,6 +66,9 @@ func (p *pipeline) importOne(ctx context.Context, s settings, lf plugin.LocalFil
 	if err == nil {
 		if err = p.store.FinishDownload(db, f.ID, final, v.Size, v.SHA1); err != nil {
 			os.Remove(final)
+		} else if err = p.store.SetSourcePath(db, f.ID, lf.Local); err != nil {
+			p.log.Warn("record library path", "file", f.Path, "err", err) // the copy then just stays
+			err = nil
 		}
 	}
 	if err != nil {

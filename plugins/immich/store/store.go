@@ -64,6 +64,7 @@ type File struct {
 	Stacked          bool
 	LocalDeleted     bool
 	CameraDeleted    bool
+	SourcePath       string // library copy this file was imported from; cleared once removed
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 }
@@ -140,6 +141,7 @@ var migrations = []string{
 	CREATE INDEX files_status_due ON files (status, next_attempt_at);
 	CREATE INDEX files_group ON files (group_key);`,
 	`CREATE INDEX files_sha1 ON files (sha1);`,
+	`ALTER TABLE files ADD COLUMN source_path TEXT NOT NULL DEFAULT '';`,
 }
 
 func (s *Store) migrate(ctx context.Context) error {
@@ -183,7 +185,7 @@ func fromMS(v int64) time.Time {
 
 const fileColumns = `id, camera, slot, path, captured_at, group_key, status, size, sha1, local_path,
 	asset_id, duplicate, download_attempts, upload_attempts, post_attempts, last_error,
-	next_attempt_at, album_added, stacked, local_deleted, camera_deleted, created_at, updated_at`
+	next_attempt_at, album_added, stacked, local_deleted, camera_deleted, created_at, updated_at, source_path`
 
 func scanFile(sc interface{ Scan(...any) error }) (File, error) {
 	var f File
@@ -191,7 +193,7 @@ func scanFile(sc interface{ Scan(...any) error }) (File, error) {
 	var status string
 	err := sc.Scan(&f.ID, &f.Camera, &f.Slot, &f.Path, &captured, &f.GroupKey, &status, &f.Size, &f.SHA1,
 		&f.LocalPath, &f.AssetID, &f.Duplicate, &f.DownloadAttempts, &f.UploadAttempts, &f.PostAttempts,
-		&f.LastError, &next, &f.AlbumAdded, &f.Stacked, &f.LocalDeleted, &f.CameraDeleted, &created, &updated)
+		&f.LastError, &next, &f.AlbumAdded, &f.Stacked, &f.LocalDeleted, &f.CameraDeleted, &created, &updated, &f.SourcePath)
 	f.Status = Status(status)
 	f.CapturedAt, f.NextAttemptAt, f.CreatedAt, f.UpdatedAt = fromMS(captured), fromMS(next), fromMS(created), fromMS(updated)
 	return f, err
@@ -429,6 +431,12 @@ func (s *Store) MarkStacked(ctx context.Context, ids ...int64) error {
 // MarkLocalDeleted flags files whose staged copy was removed.
 func (s *Store) MarkLocalDeleted(ctx context.Context, ids ...int64) error {
 	return s.setFlag(ctx, "local_deleted", ids)
+}
+
+// SetSourcePath records (or, with "", clears) the library copy of an imported file.
+func (s *Store) SetSourcePath(ctx context.Context, id int64, path string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE files SET source_path = ? WHERE id = ?`, path, id)
+	return err
 }
 
 // MarkCameraDeleted flags files whose content was deleted on the camera.

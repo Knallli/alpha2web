@@ -32,7 +32,7 @@ type LocalFile struct {
 	Path       string    // camera path without drive, e.g. "DCIM/100MSDCF/DSC00001.JPG"
 	CapturedAt time.Time // content creation time (SonyContent.CreatedUTC)
 	Size       int64
-	Local      string // absolute path of the copy; importers must not move or delete it
+	Local      string // absolute path of the copy; importers must not move or delete it unless the user opted in
 }
 
 // Importer is optional: files pulled in the gallery are handed to it.
