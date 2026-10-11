@@ -1,38 +1,37 @@
 {{template "header" .}}
 {{if .Msg}}<div class="msg ok">Saved. The camera connection restarts with the new values.</div>{{end}}
-<form method="post" action="/settings"><input type="hidden" name="csrf" value="{{.CSRF}}">
+<form method="post" action="/settings" class="settings"><input type="hidden" name="csrf" value="{{.CSRF}}">
 <section class="card"><h2>Camera</h2>
-<p class="muted">Changing camera settings reconnects to the camera.</p>
-<label for="host">Camera address</label><input id="host" name="host" value="{{.V.CameraHost}}" placeholder="empty = find the camera automatically"{{if .Lock.host}} disabled{{end}}>
-<label for="mac">Camera MAC address (optional, speeds up the search)</label><input id="mac" name="mac" value="{{.V.CameraMAC}}"{{if .Lock.mac}} disabled{{end}}>
-<label for="user">Access Authentication user (optional)</label><input id="user" name="user" value="{{.V.CameraUser}}"{{if .Lock.user}} disabled{{end}}>
-<label for="password">Password{{if .HasPass}} (set; leave empty to keep){{end}}</label><input id="password" name="password" type="password" autocomplete="new-password"{{if .Lock.password}} disabled{{end}}>
-{{if .HasPass}}<label class="check"><input type="checkbox" name="clear_password" value="1"> Remove the stored password</label>{{end}}
-<label for="fingerprint">SSH fingerprint (SHA256:…)</label><input id="fingerprint" name="fingerprint" value="{{.V.CameraFingerprint}}"{{if .Lock.fingerprint}} disabled{{end}}>
-<p class="muted">Shown on the camera under MENU → Network → Network Option → Access Authen. Info. The password is only sent to a camera with this fingerprint.</p>
-<p class="muted">Fields set by environment variables are locked.</p></section>
+<p class="muted lead">Changing these settings reconnects to the camera. Fields set by environment variables are locked.</p>
+<div class="field"><label for="host">Camera address</label><input id="host" name="host" value="{{.V.CameraHost}}" placeholder="empty = find the camera automatically"{{if .Lock.host}} disabled{{end}}></div>
+<div class="field"><label for="mac">MAC address</label><input id="mac" name="mac" value="{{.V.CameraMAC}}"{{if .Lock.mac}} disabled{{end}}><p class="muted">Optional, speeds up the search.</p></div>
+<div class="field"><label for="user">Access Authentication user</label><input id="user" name="user" value="{{.V.CameraUser}}"{{if .Lock.user}} disabled{{end}}><p class="muted">Optional.</p></div>
+<div class="field"><label for="password">Password{{if .HasPass}} (set){{end}}</label><input id="password" name="password" type="password" autocomplete="new-password" placeholder="{{if .HasPass}}leave empty to keep{{end}}"{{if .Lock.password}} disabled{{end}}>
+{{if .HasPass}}<label class="check"><input type="checkbox" name="clear_password" value="1"> Remove the stored password</label>{{end}}</div>
+<div class="field"><label for="fingerprint">SSH fingerprint</label><input id="fingerprint" name="fingerprint" value="{{.V.CameraFingerprint}}" placeholder="SHA256:…"{{if .Lock.fingerprint}} disabled{{end}}>
+<p class="muted">Shown on the camera under MENU → Network → Network Option → Access Authen. Info. The password is only sent to a camera with this fingerprint.</p></div></section>
 <section class="card"><h2>Diagnostics</h2>
-<label for="keepalive">Property poll interval</label><input id="keepalive" name="keepalive" value="{{.V.Keepalive}}" placeholder="10s"{{if .Lock.keepalive}} disabled{{end}}>
-<p class="muted">How often the idle session asks the camera for changed properties. 0 = no requests of our own after connecting (use this to test whether they upset the camera).</p>
-<label class="check"><input type="checkbox" name="debug_log" value="1"{{if .V.DebugLog}} checked{{end}}> Log every camera operation with its duration (debug)</label></section>
+<div class="field"><label for="keepalive">Property poll interval</label><input id="keepalive" name="keepalive" value="{{.V.Keepalive}}" placeholder="10s"{{if .Lock.keepalive}} disabled{{end}}>
+<p class="muted">How often the idle session asks the camera for changed properties. 0 = no requests of our own after connecting (use this to test whether they upset the camera).</p></div>
+<div class="field"><label class="check"><input type="checkbox" name="debug_log" value="1"{{if .V.DebugLog}} checked{{end}}> Debug log: every camera operation with its duration</label></div></section>
 <section class="card"><h2>Export to folder</h2>
-<p class="muted">Where the gallery's "Pull selected" puts the originals. Fields set by environment variables are locked.</p>
-<label for="export_dir">Target folder</label><input id="export_dir" name="export_dir" value="{{.E.Dir}}"{{if .Lock.export_dir}} disabled{{end}}>
-<p class="muted">Created on the first pull. In Docker this is the mounted <code>/library</code>. <code>LIBRARY_DIR</code></p>
-<label for="export_template">Path template</label><input id="export_template" name="export_template" value="{{.E.Template}}"{{if .Lock.export_template}} disabled{{end}}>
-<p class="muted">Example: <code>{{.Example}}</code> (an ARW file of 2025-03-07 09:05:02). <code>/</code> makes folders. Tokens: <code>{camera}</code> <code>{serial}</code> <code>{slot}</code> <code>{year}</code> <code>{month}</code> <code>{day}</code> <code>{hour}</code> <code>{minute}</code> <code>{second}</code> <code>{date}</code> (the camera's clock) <code>{folder}</code> (e.g. 100MSDCF) <code>{name}</code> <code>{ext}</code> <code>{type}</code> (JPEG, HEIF, RAW, VIDEO, OTHER) <code>{seq}</code> (running number of the pull). Needs <code>{name}</code> or <code>{seq}</code>. <code>EXPORT_PATH_TEMPLATE</code></p>
-<label for="export_case">File name case</label><select id="export_case" name="export_case"{{if .Lock.export_case}} disabled{{end}}>{{range .Cases}}<option{{if eq . $.E.Case}} selected{{end}}>{{.}}</option>{{end}}</select>
-<label>File types to export</label><div class="checks"><input type="hidden" name="export_types_present" value="1">{{range .Types}}<label class="check"><input type="checkbox" name="export_types" value="{{.}}"{{if $.E.Wants .}} checked{{end}}{{if $.Lock.export_types}} disabled{{end}}> {{.}}</label>{{end}}</div>
-<label for="export_conflict">If the file exists</label><select id="export_conflict" name="export_conflict"{{if .Lock.export_conflict}} disabled{{end}}>
+<p class="muted lead">Where the gallery's "Pull selected" puts the originals. Fields set by environment variables are locked.</p>
+<div class="field"><label for="export_dir">Target folder</label><input id="export_dir" name="export_dir" value="{{.E.Dir}}"{{if .Lock.export_dir}} disabled{{end}}>
+<p class="muted">Created on the first pull. In Docker this is the mounted <code>/library</code>. <code>LIBRARY_DIR</code></p></div>
+<div class="field"><label for="export_template">Path template</label><input id="export_template" name="export_template" value="{{.E.Template}}"{{if .Lock.export_template}} disabled{{end}}>
+<p class="muted">Example: <code>{{.Example}}</code> (an ARW file of 2025-03-07 09:05:02). <code>/</code> makes folders. Tokens: <code>{camera}</code> <code>{serial}</code> <code>{slot}</code> <code>{year}</code> <code>{month}</code> <code>{day}</code> <code>{hour}</code> <code>{minute}</code> <code>{second}</code> <code>{date}</code> (the camera's clock) <code>{folder}</code> (e.g. 100MSDCF) <code>{name}</code> <code>{ext}</code> <code>{type}</code> (JPEG, HEIF, RAW, VIDEO, OTHER) <code>{seq}</code> (running number of the pull). Needs <code>{name}</code> or <code>{seq}</code>. <code>EXPORT_PATH_TEMPLATE</code></p></div>
+<div class="field"><label for="export_case">File name case</label><select id="export_case" name="export_case"{{if .Lock.export_case}} disabled{{end}}>{{range .Cases}}<option{{if eq . $.E.Case}} selected{{end}}>{{.}}</option>{{end}}</select></div>
+<div class="field"><label>File types to export</label><div class="checks"><input type="hidden" name="export_types_present" value="1">{{range .Types}}<label class="check"><input type="checkbox" name="export_types" value="{{.}}"{{if $.E.Wants .}} checked{{end}}{{if $.Lock.export_types}} disabled{{end}}> {{.}}</label>{{end}}</div></div>
+<div class="field"><label for="export_conflict">If the file exists</label><select id="export_conflict" name="export_conflict"{{if .Lock.export_conflict}} disabled{{end}}>
 <option value="suffix"{{if eq .E.Conflict "suffix"}} selected{{end}}>skip if the size is the same, otherwise add _1, _2 ...</option>
 <option value="always-suffix"{{if eq .E.Conflict "always-suffix"}} selected{{end}}>always add _1, _2 ...</option>
-<option value="overwrite"{{if eq .E.Conflict "overwrite"}} selected{{end}}>overwrite</option></select>
-<input type="hidden" name="export_mtime_present" value="1"><label class="check"><input type="checkbox" name="export_mtime" value="1"{{if .E.SetMtime}} checked{{end}}{{if .Lock.export_mtime}} disabled{{end}}> Set the file's modification time to the capture time</label></section>
+<option value="overwrite"{{if eq .E.Conflict "overwrite"}} selected{{end}}>overwrite</option></select></div>
+<div class="field"><input type="hidden" name="export_mtime_present" value="1"><label class="check"><input type="checkbox" name="export_mtime" value="1"{{if .E.SetMtime}} checked{{end}}{{if .Lock.export_mtime}} disabled{{end}}> Set the file's modification time to the capture time</label></div></section>
 {{range .Plugins}}<section class="card"><h2>{{.Title}}</h2>
-{{range .Fields}}{{if eq .Type "checkbox"}}<input type="hidden" name="{{.Input}}.present" value="1">
+{{range .Fields}}<div class="field">{{if eq .Type "checkbox"}}<input type="hidden" name="{{.Input}}.present" value="1">
 <label class="check"><input id="{{.Input}}" name="{{.Input}}" type="checkbox" value="true"{{if .Checked}} checked{{end}}{{if .Locked}} disabled{{end}}> {{.Label}}</label>
 {{else}}<label for="{{.Input}}">{{.Label}}{{if and (eq .Type "password") .IsSet}} (set; leave empty to keep){{end}}</label>
 <input id="{{.Input}}" name="{{.Input}}"{{if .Locked}} disabled{{end}} {{if eq .Type "password"}}type="password" autocomplete="new-password"{{else}}value="{{.Value}}"{{end}}{{with .Placeholder}} placeholder="{{.}}"{{else}}{{with .Default}} placeholder="{{.}}"{{end}}{{end}}>
-{{end}}{{if .Locked}}<p class="muted">Set via {{.Env}}</p>{{end}}{{if .Help}}<p class="muted">{{.Help}}</p>{{end}}{{end}}</section>{{end}}
-<div class="form-bar"><button><svg class="ico"><use href="#i-save"/></svg>Save settings</button></div></form>
+{{end}}{{if .Locked}}<p class="muted">Set via {{.Env}}</p>{{end}}{{if .Help}}<p class="muted">{{.Help}}</p>{{end}}</div>{{end}}</section>{{end}}
+<div class="form-bar"><span class="muted">Changes apply after saving.</span><button><svg class="ico"><use href="#i-save"/></svg>Save settings</button></div></form>
 {{template "footer" .}}

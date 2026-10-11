@@ -14,11 +14,12 @@
 <section class="card" id="toolbar" hidden>
 <h2>Settings</h2>
 <input type="search" id="q" placeholder="Search name, description or code…  (press / to focus)" aria-label="Search settings">
-<div class="checks">
+<div class="checks"><span class="muted">Show</span>
 <label class="check"><input type="checkbox" id="f-change"> Only changeable</label>
-<label class="check"><input type="checkbox" id="f-undoc"> Show undocumented</label>
-<label class="check"><input type="checkbox" id="f-unlock"> Allow editing undocumented settings</label>
-<label class="check"><input type="checkbox" id="f-danger"> Enable dangerous actions</label>
+<label class="check"><input type="checkbox" id="f-undoc"> Undocumented</label></div>
+<div class="checks"><span class="muted">Unlock</span>
+<label class="check"><input type="checkbox" id="f-unlock"> Edit undocumented settings</label>
+<label class="check"><input type="checkbox" id="f-danger"> Dangerous actions</label>
 </div>
 <p id="w-unlock" class="p-note d-danger" hidden>Undocumented settings have no description and can break camera behaviour. Change them only if you know what they do.</p>
 <p id="conn" class="muted" role="status" aria-live="polite"></p>

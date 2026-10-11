@@ -23,9 +23,10 @@
 <div class="actions card-foot">{{if .S.Connected}}<form method="post" action="/camera/disconnect"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary"><svg class="ico"><use href="#i-x"/></svg>Disconnect</button></form>
 {{else if not (or .S.Connecting .S.Reconnecting)}}<form method="post" action="/camera/connect"><input type="hidden" name="csrf" value="{{.CSRF}}"><button><svg class="ico"><use href="#i-plug"/></svg>Connect</button></form>{{end}}</div>
 <details class="note"><summary>Only one connection at a time</summary><p class="muted">The camera accepts only one remote connection. Do not use the Sony app (Creators' App / Imaging Edge) at the same time — it blocks alpha2web or drops its session.</p></details></section>
-{{range .Plugins}}{{if or .Headline .Rows}}<section class="card"><h2>{{.Title}}</h2>
+{{range .Plugins}}{{if or .Headline .Rows .Actions}}<section class="card"><h2>{{.Title}}</h2>
 {{if .Headline}}<p class="big">{{if .Level}}<span class="dot {{cls .Level}}"></span>{{end}}{{.Headline}}</p>{{end}}
-{{if .Rows}}<dl>{{range .Rows}}<dt>{{.Label}}</dt><dd>{{if .Link}}<a href="{{.Link}}" target="_blank" rel="noopener">{{.Value}}</a>{{else}}{{.Value}}{{end}}</dd>{{end}}</dl>{{end}}</section>{{end}}{{end}}
+{{if .Rows}}<dl>{{range .Rows}}<dt>{{.Label}}</dt><dd>{{if .Link}}<a href="{{.Link}}" target="_blank" rel="noopener">{{.Value}}</a>{{else}}{{.Value}}{{end}}</dd>{{end}}</dl>{{end}}
+{{if .Actions}}{{$n := .Name}}<div class="actions card-foot">{{range .Actions}}<form method="post" action="/plugins/{{$n}}/actions/{{.ID}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button{{if not .Primary}} class="secondary"{{end}}>{{.Label}}</button></form>{{end}}</div>{{end}}</section>{{end}}{{end}}
 </div>
 {{range .Plugins}}{{if or .Counts .Totals}}<section class="card"><h2>Queue</h2>
 {{if .Counts}}<div class="kpis">{{range .Counts}}{{if or .N (not .Bad)}}<div class="kpi{{if .N}} on{{end}}{{if and .Bad .N}} bad{{end}}"><span class="n">{{.N}}</span><span class="l">{{.Label}}</span></div>{{end}}{{end}}</div>{{end}}
@@ -36,5 +37,4 @@
 {{if .Recent}}<section class="card"><h2>Recent files</h2><div class="scroll"><table><thead><tr><th>File</th><th>Status</th><th>Size</th><th>When</th></tr></thead><tbody>
 {{range .Recent}}<tr><td title="{{.Path}}">{{if .Link}}<a href="{{.Link}}" target="_blank" rel="noopener">{{if .Name}}{{.Name}}{{else}}{{base .Path}}{{end}}</a>{{else if .Name}}{{.Name}}{{else}}{{base .Path}}{{end}}</td><td>{{template "badge" .Status}}</td><td>{{if .Size}}{{bytes .Size}}{{end}}</td><td>{{ago .Updated}}</td></tr>{{end}}
 </tbody></table></div><p><a href="/files">All files →</a></p></section>{{end}}
-{{if .Actions}}{{$n := .Name}}<div class="actions">{{range .Actions}}<form method="post" action="/plugins/{{$n}}/actions/{{.ID}}"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button{{if not .Primary}} class="secondary"{{end}}>{{.Label}}</button></form>{{end}}</div>{{end}}
 {{end}}{{end}}

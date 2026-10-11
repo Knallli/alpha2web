@@ -1,7 +1,7 @@
 {{template "header" .}}
 {{if .Msg}}<div class="msg ok">Done: {{.Msg}}</div>{{end}}
 {{range .Tracked}}{{$pl := .}}<section class="card"><h2>Tracked files</h2>
-<form method="get" action="/files" class="inline"><label for="st">Status</label>
+<form method="get" action="/files" class="toolbar"><label for="st">Status</label>
 <select id="st" name="status" data-autosubmit><option value="">all</option>{{range .Statuses}}<option value="{{.}}"{{if eq . $pl.Filter}} selected{{end}}>{{.}}</option>{{end}}</select><button class="secondary">Filter</button>
 <input type="search" id="ft" placeholder="Search file name…" aria-label="Search file name" data-filter="#files-table tbody tr"></form>
 {{if .Files}}<div class="scroll"><table id="files-table"><thead><tr><th>File</th><th>Slot</th><th>Captured</th><th>Status</th><th>Size</th><th>Tries</th><th>Updated</th><th>Note</th></tr></thead><tbody>

@@ -1,12 +1,13 @@
 {{template "header" .}}
-<p class="hint"><svg class="ico"><use href="#i-alert"/></svg><span>The camera accepts only one remote connection. Do not use the Sony app (Creators' App / Imaging Edge) at the same time — it blocks alpha2web or drops its session.</span></p>
+<details class="note"><summary>Only one connection at a time</summary><p class="muted">The camera accepts only one remote connection. Do not use the Sony app (Creators' App / Imaging Edge) at the same time — it blocks alpha2web or drops its session.</p></details>
 {{if .Msg}}<div class="msg ok">Done: {{.Msg}}</div>{{end}}{{with .Last}}<div class="msg {{if .Err}}bad{{else}}ok{{end}}">{{.Kind}} finished {{ago .Ended}}: {{.Result}} {{.Err}}</div>{{end}}
 <div id="gallery" data-csrf="{{.CSRF}}" data-slot="{{.Slot}}">
 <section id="job" class="card" hidden><h2 id="job-title"></h2><progress id="job-bar"></progress><p id="job-cur" class="muted"></p><button type="button" class="secondary" id="job-stop"><svg class="ico"><use href="#i-x"/></svg>Stop</button></section>
 <div id="job-err" class="msg bad" hidden></div>
-<nav class="tabs"><a href="/gallery?slot=1"{{if eq .Slot 1}} aria-current="page"{{end}}>Slot 1</a><a href="/gallery?slot=2"{{if eq .Slot 2}} aria-current="page"{{end}}>Slot 2</a></nav><span class="muted">{{.Total}} items</span>
-<div class="actions"><button type="button" id="g-refresh"><svg class="ico"><use href="#i-refresh"/></svg>{{if .HasCat}}Refresh from camera{{else}}Load from camera{{end}}</button>
+<div class="g-head"><nav class="tabs"><a href="/gallery?slot=1"{{if eq .Slot 1}} aria-current="page"{{end}}>Slot 1</a><a href="/gallery?slot=2"{{if eq .Slot 2}} aria-current="page"{{end}}>Slot 2</a></nav><span class="muted">{{.Total}} items</span>
+<div class="actions g-actions"><button type="button" id="g-refresh"><svg class="ico"><use href="#i-refresh"/></svg>{{if .HasCat}}Refresh from camera{{else}}Load from camera{{end}}</button>
 <span class="muted">{{if not .Never}}refreshed {{ago .S.Refreshed}}{{end}}</span></div>
+</div>
 {{if .S.Err}}<div class="msg bad">{{.S.Err}}</div>{{end}}
 {{if .Never}}<p class="muted">Nothing is loaded from the camera yet. "Load from camera" lists the cards and fetches the thumbnails once; after that this page works without the camera.</p>
 {{else if .S.Empty}}<p class="muted">No card in slot {{.Slot}}, or it holds no files.</p>{{end}}

@@ -198,3 +198,43 @@ details.note p{margin:8px 0 0}
 .kpi .l{font-size:.82rem;color:var(--muted)}
 .kpis.small .n{font-size:1.05rem;color:var(--fg)}
 .kpis.small .kpi{padding:10px 14px}
+
+/* settings: one labelled row per field */
+.lead{margin:-6px 0 8px}
+.field{display:grid;grid-template-columns:minmax(160px,240px) minmax(0,1fr);gap:4px 28px;padding:16px 0;border-top:1px solid var(--line);align-items:start}
+.lead + .field,h2 + .field{border-top:0;padding-top:4px}
+.field>label{margin:8px 0 0}
+.field>label.check{grid-column:2;margin:0}
+.field>.muted,.field>.checks{grid-column:2;margin:0}
+.field>input[type=hidden]{display:none}
+.field input:not([type=checkbox]),.field select{max-width:520px}
+.field .muted{line-height:1.5}
+@media(max-width:700px){.field{grid-template-columns:1fr}.field>label.check,.field>.muted,.field>.checks{grid-column:1}}
+.form-bar{align-items:center;justify-content:space-between;gap:12px}
+
+/* control: name + description left, widget right */
+.prop{display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,auto);gap:2px 28px;padding:16px 0 16px 14px;border-left:3px solid transparent;align-items:start}
+.prop .p-head,.prop .p-desc,.prop .p-note{grid-column:1}
+.prop .p-ctl{grid-column:2;grid-row:1 / span 3;justify-content:flex-end}
+.prop .p-reason{grid-column:1 / -1}
+.prop:has(.d-danger){border-left-color:var(--bad)}
+.prop:has(.d-caution){border-left-color:var(--wait)}
+.prop .p-desc{margin:0}
+@media(max-width:700px){.prop{grid-template-columns:1fr}.prop .p-ctl{grid-column:1;grid-row:auto;justify-content:flex-start;margin-top:8px}}
+#toolbar .checks{align-items:center;gap:2px 22px;margin-top:6px}
+#toolbar .checks>.muted{min-width:60px;text-transform:uppercase;letter-spacing:.06em;font-size:.72rem}
+
+/* gallery head */
+.g-head{display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px;margin-bottom:18px}
+.g-head .tabs{margin:0}
+.g-head>.muted{flex:1}
+.g-actions{margin-left:auto}
+.g-meta>span:first-child{color:var(--fg);font-weight:600}
+.sel-bar+p.muted{margin:0 0 16px}
+
+/* tables and toolbars */
+thead th{position:sticky;top:0;background:var(--card)}
+.toolbar select{width:auto}
+.toolbar .check{white-space:nowrap}
+nav.tabs{flex:none}
+.toolbar label{margin:0}
