@@ -304,8 +304,8 @@ func TestGalleryPullSettings(t *testing.T) {
 	if !strings.Contains(j.Result, "2 files copied") {
 		t.Fatalf("%+v", j)
 	}
-	jp, _ := filepath.Glob(filepath.Join(dir, "jpeg", "000?_dsc00001.jpg"))
-	rw, _ := filepath.Glob(filepath.Join(dir, "raw", "000?_dsc00001.arw"))
+	jp, _ := filepath.Glob(filepath.Join(dir, "JPEG", "000?_dsc00001.jpg"))
+	rw, _ := filepath.Glob(filepath.Join(dir, "RAW", "000?_dsc00001.arw"))
 	if len(jp) != 1 || len(rw) != 1 {
 		t.Fatal(jp, rw)
 	}
