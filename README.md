@@ -65,7 +65,7 @@ CAMERA_HOST=192.168.1.50 go run ./cmd/alpha2web
 | `HTTP_ADDR` | listen address, default `:8765` |
 | `DATA_DIR` | settings and plugin state, default `data` |
 | `LIBRARY_DIR`, `EXPORT_PATH_TEMPLATE`, `EXPORT_CASE`, `EXPORT_TYPES`, `EXPORT_CONFLICT`, `EXPORT_SET_MTIME` | gallery export folder and naming, see "Export settings" (`LIBRARY_DIR` is `/library` in docker-compose.yml) |
-| `IMMICH_URL`, `IMMICH_API_KEY`, `IMMICH_ALBUM` | Immich server, API key (needs `asset.upload`, `album.*`, `stack.create`) and optional album |
+| `IMMICH_URL`, `IMMICH_API_KEY`, `IMMICH_ALBUM` | Immich server, API key (needs `asset.upload`, `asset.view`, `asset.download`, `album.*`, `stack.create`) and optional album |
 | `IMMICH_STACK_RAW_JPEG`, `DELETE_AFTER_UPLOAD`, `DELETE_LIBRARY_AFTER_UPLOAD`, `IMMICH_DELETE_ON_CAMERA` | stack pairs (default `true`), delete the staged copy (default `true`), delete the gallery-pulled library copy once it is in Immich (default `false`), delete from the card (default `false`) |
 | `SKIP_EXTENSIONS`, `UPLOAD_CONCURRENCY`, `DOWNLOAD_STALL_TIMEOUT`, `MIN_FREE_SPACE_MB`, `RETRY_BASE_DELAY`, `RETRY_MAX_DELAY` | Immich transfer tuning, see [.env.example](.env.example) |
 | `STAGING_DIR` | where downloads wait for the upload, default `<DATA_DIR>/staging` |
