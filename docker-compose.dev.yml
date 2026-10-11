@@ -1,0 +1,54 @@
+# Self-updating dev stack, like the linuxserver.io images: on every container
+# start it fetches the newest code of $BRANCH (default main) from GitHub and
+# runs it. No image pull, no local checkout needed:
+#
+#   curl -O https://raw.githubusercontent.com/knallli/alpha2web/main/docker-compose.dev.yml
+#   docker compose -f docker-compose.dev.yml up -d
+#   docker compose -f docker-compose.dev.yml restart   # = update
+#   open http://localhost:8766
+#
+# Other branch: BRANCH=frontend-overhaul docker compose -f docker-compose.dev.yml up -d
+# Runs next to the real instance (port 8766, own volumes). Needs Linux (host
+# networking for camera discovery); on macOS/Windows run natively instead:
+#   DATA_DIR=.dev/data HTTP_ADDR=:8766 go run ./cmd/alpha2web
+services:
+  alpha2web:
+    image: golang:1.26
+    container_name: alpha2web-dev
+    restart: unless-stopped
+    network_mode: host
+    working_dir: /src
+    # Offline or fetch failure: keeps running the code that is already there.
+    command:
+      - sh
+      - -c
+      - |
+        b=$${BRANCH:-main}
+        if [ -d .git ]; then
+          git fetch -q origin "$$b" && git checkout -q -f -B "$$b" FETCH_HEAD || echo "update failed, running the previous code"
+        else
+          git clone -q -b "$$b" https://github.com/Knallli/alpha2web .
+        fi
+        git log -1 --format='running %h %s'
+        exec go run -ldflags "-X main.version=$$(git rev-parse --short HEAD)" ./cmd/alpha2web
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      BRANCH: ${BRANCH:-main}
+      HTTP_ADDR: ":8766"
+      DATA_DIR: /state/data
+      STAGING_DIR: /state/staging
+      LIBRARY_DIR: /state/library
+    volumes:
+      - src:/src
+      - state:/state
+      - gocache:/root/.cache/go-build
+      - gomod:/go/pkg/mod
+    stop_grace_period: 30s
+
+volumes:
+  src:
+  state:
+  gocache:
+  gomod:

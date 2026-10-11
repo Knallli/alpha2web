@@ -35,6 +35,10 @@ Update with `docker compose pull && docker compose up -d`. Images are published 
 
 Camera setup (Wi-Fi, PC Remote, Access Authentication): see [alpha2go](https://github.com/Knallli/alpha2go/blob/main/docs/camera-setup.md).
 
+## Dev container (not for production)
+
+`docker-compose.dev.yml` runs the newest code of a branch straight from GitHub on every container start (default `main`, set `BRANCH=...` for another): `restart` = update, no image pull. It compiles on start and runs unreviewed code, so use the pinned `ghcr.io/knallli/alpha2web` image above for production. See the header of the file.
+
 ## Run without Docker
 
 ```
