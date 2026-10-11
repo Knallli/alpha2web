@@ -312,8 +312,14 @@ func (c *Client) CreateStack(ctx context.Context, assetIDs []string) (string, er
 // BaseURL returns the server URL as configured (with the /api suffix).
 // Fetch streams a GET response (an image or the original file). The caller closes it.
 func (c *Client) Fetch(ctx context.Context, path string) (io.ReadCloser, string, error) {
+	// An unreachable server must not hold a page view for minutes: give up if
+	// there are no response headers after 15 s (the body may stream longer).
+	ctx, cancel := context.WithCancel(ctx)
+	stall := time.AfterFunc(15*time.Second, cancel)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
 	if err != nil {
+		stall.Stop()
+		cancel()
 		return nil, "", err
 	}
 	if c.apiKey != "" {
@@ -323,15 +329,28 @@ func (c *Client) Fetch(ctx context.Context, path string) (io.ReadCloser, string,
 		req.Header.Set("User-Agent", c.ua)
 	}
 	resp, err := c.http.Do(req)
+	stall.Stop()
 	if err != nil {
+		cancel()
 		return nil, "", err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		resp.Body.Close()
+		cancel()
 		return nil, "", &APIError{Method: http.MethodGet, Path: path, Status: resp.StatusCode, Body: strings.TrimSpace(string(msg))}
 	}
-	return resp.Body, resp.Header.Get("Content-Type"), nil
+	return &cancelBody{resp.Body, cancel}, resp.Header.Get("Content-Type"), nil
+}
+
+type cancelBody struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (b *cancelBody) Close() error {
+	defer b.cancel()
+	return b.ReadCloser.Close()
 }
 
 func (c *Client) BaseURL() string { return c.base }

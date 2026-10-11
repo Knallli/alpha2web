@@ -45,9 +45,10 @@ var ErrNotStored = errors.New("plugin does not hold this file")
 type Viewer interface {
 	// Stored reports whether the plugin holds the file.
 	Stored(ctx context.Context, f LocalFile) bool
-	// Open returns the original, or with preview a JPEG/WebP rendition, and its
-	// content type. It returns ErrNotStored if the file is not held.
-	Open(ctx context.Context, f LocalFile, preview bool) (io.ReadCloser, string, error)
+	// Open returns the file in the requested size ("thumbnail", "preview" or
+	// "original") and its content type; the first two are image renditions.
+	// It returns ErrNotStored if the file is not held.
+	Open(ctx context.Context, f LocalFile, size string) (io.ReadCloser, string, error)
 }
 
 // Importer is optional: files pulled in the gallery are handed to it.

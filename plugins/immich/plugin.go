@@ -32,7 +32,7 @@ func (*Plugin) Fields() []plugin.Field {
 		{Key: "url", Label: "Immich address", Group: groupImmich, Placeholder: "http://immich:2283", Env: "IMMICH_URL"},
 		{Key: "api_key", Label: "API key", Kind: plugin.FieldSecret, Group: groupImmich,
 			Env:  "IMMICH_API_KEY",
-			Help: "Create one in Immich under Account Settings → API Keys with these permissions: asset.upload, album.read, album.create, albumAsset.create, stack.create. The key is stored in the data volume and never shown again."},
+			Help: "Create one in Immich under Account Settings → API Keys with these permissions: asset.upload, asset.view, asset.download, album.read, album.create, albumAsset.create, stack.create (view and download let the gallery show shots from Immich). The key is stored in the data volume and never shown again."},
 		{Key: "album", Label: "Album (optional)", Group: groupImmich, Env: "IMMICH_ALBUM"},
 		{Key: "stack_raw_jpeg", Label: "Stack RAW+JPEG pairs", Kind: plugin.FieldBool, Default: "true", Group: groupImmich,
 			Env: "IMMICH_STACK_RAW_JPEG", Help: "Stack RAW+JPEG pairs in Immich (JPEG shown)"},

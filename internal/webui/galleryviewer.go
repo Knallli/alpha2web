@@ -2,6 +2,7 @@ package webui
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 
@@ -32,18 +33,31 @@ func (h *Handler) stored(ctx context.Context, slot uint32, it catItem, f catFile
 }
 
 // openStored streams the file from the first plugin that holds it.
-func (h *Handler) openStored(ctx context.Context, slot uint32, it catItem, f catFile, preview bool) (io.ReadCloser, string, bool) {
+func (h *Handler) openStored(ctx context.Context, slot uint32, it catItem, f catFile, size string) (io.ReadCloser, string, bool) {
 	lf := h.localFile(slot, it, f)
 	for _, p := range plugin.All() {
 		v, ok := p.(plugin.Viewer)
 		if !ok {
 			continue
 		}
-		rc, ct, err := v.Open(ctx, lf, preview)
+		rc, ct, err := v.Open(ctx, lf, size)
 		if err == nil {
 			return rc, ct, true
 		}
-		h.Log().Debug("stored copy not available", "plugin", p.Name(), "err", err)
+		if !errors.Is(err, plugin.ErrNotStored) {
+			h.warnOnce("viewing a stored copy failed ("+p.Name()+"; Immich needs the asset.view and asset.download permissions)", err)
+		}
 	}
 	return nil, "", false
+}
+
+// storedImage reads an image rendition ("thumbnail" or "preview") a plugin holds.
+func (h *Handler) storedImage(ctx context.Context, slot uint32, it catItem, f catFile, size string) ([]byte, bool) {
+	rc, _, ok := h.openStored(ctx, slot, it, f, size)
+	if !ok {
+		return nil, false
+	}
+	defer rc.Close()
+	data, err := io.ReadAll(io.LimitReader(rc, maxViewBytes))
+	return data, err == nil && len(data) > 0
 }

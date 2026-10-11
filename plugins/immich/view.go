@@ -2,6 +2,7 @@ package immich
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/url"
 
@@ -32,14 +33,18 @@ func (p *Plugin) Stored(ctx context.Context, f plugin.LocalFile) bool {
 }
 
 // Open streams the asset (or its preview rendition) from Immich.
-func (p *Plugin) Open(ctx context.Context, f plugin.LocalFile, preview bool) (io.ReadCloser, string, error) {
+func (p *Plugin) Open(ctx context.Context, f plugin.LocalFile, size string) (io.ReadCloser, string, error) {
 	im, id := p.asset(ctx, f)
 	if im == nil || id == "" {
 		return nil, "", plugin.ErrNotStored
 	}
 	path := "/assets/" + url.PathEscape(id) + "/original"
-	if preview {
-		path = "/assets/" + url.PathEscape(id) + "/thumbnail?size=preview"
+	switch size {
+	case "thumbnail", "preview":
+		path = "/assets/" + url.PathEscape(id) + "/thumbnail?size=" + size
+	case "original":
+	default:
+		return nil, "", fmt.Errorf("unknown size %q", size)
 	}
 	return im.Fetch(ctx, path)
 }

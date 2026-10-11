@@ -406,11 +406,17 @@ func (h *Handler) galleryThumb(w http.ResponseWriter, r *http.Request) {
 			serveImage(w, data)
 			return
 		}
+		// not cached (the card was never read for it): a plugin may hold the shot
+		if data, ok = h.storedImage(r.Context(), slot, it, it.Files[it.Cover], "thumbnail"); ok {
+			serveImage(w, h.putImage(slot, it, "thumb", data))
+			return
+		}
 	}
 	http.NotFound(w, r)
 }
 
-// galleryPreview serves the expanded original: cache, then a pulled copy, then the camera.
+// galleryPreview serves the expanded original. Order: a plugin that holds the
+// shot (Immich), the cache, a pulled library copy, the camera.
 func (h *Handler) galleryPreview(w http.ResponseWriter, r *http.Request) {
 	slot, it, ok := h.lookup(r)
 	if !ok {
@@ -418,22 +424,17 @@ func (h *Handler) galleryPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	g := h.galleryState()
+	cover := it.Files[it.Cover]
+	if data, ok := h.storedImage(r.Context(), slot, it, cover, "preview"); ok {
+		serveImage(w, h.putImage(slot, it, "preview", data))
+		return
+	}
 	if data, ok := g.getImage(slot, it, "preview"); ok {
 		serveImage(w, data)
 		return
 	}
-	cover := it.Files[it.Cover]
 	if pulled(cover) && viewable(fileExt(cover.Path)) {
 		if data, err := os.ReadFile(cover.Local); err == nil {
-			serveImage(w, h.putImage(slot, it, "preview", data))
-			return
-		}
-	}
-	// a copy a plugin holds (Immich) needs no camera
-	if rc, _, ok := h.openStored(r.Context(), slot, it, cover, true); ok {
-		data, err := io.ReadAll(io.LimitReader(rc, maxViewBytes))
-		rc.Close()
-		if err == nil && len(data) > 0 {
 			serveImage(w, h.putImage(slot, it, "preview", data))
 			return
 		}
@@ -528,20 +529,20 @@ func (h *Handler) galleryFile(w http.ResponseWriter, r *http.Request) {
 	f := it.Files[fi]
 	name := strings.NewReplacer(`"`, "", "\r", "", "\n", "").Replace(baseName(f.Path))
 	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
-	if pulled(f) {
-		if file, err := os.Open(f.Local); err == nil {
-			defer file.Close()
-			http.ServeContent(w, r, name, time.Time{}, file)
-			return
-		}
-	}
-	if rc, ct, ok := h.openStored(r.Context(), slot, it, f, false); ok {
+	if rc, ct, ok := h.openStored(r.Context(), slot, it, f, "original"); ok {
 		defer rc.Close()
 		if ct != "" {
 			w.Header().Set("Content-Type", ct)
 		}
 		io.Copy(w, rc)
 		return
+	}
+	if pulled(f) {
+		if file, err := os.Open(f.Local); err == nil {
+			defer file.Close()
+			http.ServeContent(w, r, name, time.Time{}, file)
+			return
+		}
 	}
 	c, done, err := h.use(r)
 	if err != nil {

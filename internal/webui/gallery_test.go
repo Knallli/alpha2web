@@ -427,16 +427,17 @@ func (*stubViewer) Name() string                                    { return "st
 func (*stubViewer) Fields() []plugin.Field                          { return nil }
 func (*stubViewer) Run(ctx context.Context, _ plugin.Env) error     { <-ctx.Done(); return nil }
 func (v *stubViewer) Stored(context.Context, plugin.LocalFile) bool { return v.on.Load() }
-func (v *stubViewer) Open(_ context.Context, _ plugin.LocalFile, _ bool) (io.ReadCloser, string, error) {
+func (v *stubViewer) Open(_ context.Context, _ plugin.LocalFile, _ string) (io.ReadCloser, string, error) {
 	if !v.on.Load() {
 		return nil, "", plugin.ErrNotStored
 	}
 	return io.NopCloser(strings.NewReader("\xff\xd8stored\xff\xd9")), "image/jpeg", nil
 }
 
+var stub = func() *stubViewer { v := &stubViewer{}; plugin.Register(v); return v }()
+
 func TestGalleryPurgeRemovesCopiesStoredElsewhere(t *testing.T) {
-	v := &stubViewer{}
-	plugin.Register(v)
+	v := stub
 	jpg := "\xff\xd8hello\xff\xd9"
 	h, srv := galleryFixture(t, map[string]string{"DSC00001.JPG": jpg, "DSC00002.ARW": "rawonly"})
 	runJob(t, h, "/gallery/refresh", nil)
@@ -467,5 +468,27 @@ func TestGalleryPurgeRemovesCopiesStoredElsewhere(t *testing.T) {
 	j := runJob(t, h, "/gallery/pull", url.Values{"slot": {"1"}, "k": keys})
 	if !strings.Contains(j.Result, "stored in Immich") || len(srv.ContentRequests()) != n {
 		t.Fatalf("%+v", j)
+	}
+}
+
+func TestGalleryViewsStoredCopyFirst(t *testing.T) {
+	stub.on.Store(true)
+	defer stub.on.Store(false)
+	jpg := "\xff\xd8hello\xff\xd9"
+	h, _ := galleryFixture(t, map[string]string{"DSC00001.JPG": jpg})
+	runJob(t, h, "/gallery/refresh", nil)
+	k := itemKeys(h, 1)[0]
+	want := "\xff\xd8stored\xff\xd9"
+	// not pulled, camera data cached: the plugin's copy still wins
+	if w := get(h, "/gallery/preview?slot=1&k="+k); w.Code != 200 || w.Body.String() != want {
+		t.Fatalf("preview: %d %q", w.Code, w.Body.String())
+	}
+	// no cached thumbnail: it comes from the plugin instead of a 404
+	os.RemoveAll(h.galleryState().cache.Dir)
+	if w := get(h, "/gallery/thumb?slot=1&k="+k); w.Code != 200 || w.Body.String() != want {
+		t.Fatalf("thumb: %d %q", w.Code, w.Body.String())
+	}
+	if w := get(h, "/gallery/file?slot=1&k="+k+"&f=0"); w.Code != 200 || w.Body.String() != want {
+		t.Fatalf("original: %d %q", w.Code, w.Body.String())
 	}
 }

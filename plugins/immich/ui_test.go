@@ -208,7 +208,7 @@ func TestViewerServesUploadedFile(t *testing.T) {
 	if !p.Stored(context.Background(), lf) {
 		t.Fatal("not reported as stored")
 	}
-	rc, _, err := p.Open(context.Background(), lf, true)
+	rc, _, err := p.Open(context.Background(), lf, "preview")
 	if err != nil {
 		t.Fatal(err)
 	}
