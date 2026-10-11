@@ -11,26 +11,25 @@
 <div class="grid">
 <section class="card"><h2>Camera</h2>
 <p class="big">{{if .S.Connected}}<span class="dot ok"></span>Connected{{else if .S.Reconnecting}}<span class="dot wait"></span>Reconnecting…{{else if .S.Connecting}}<span class="dot wait"></span>Connecting…{{else}}<span class="dot wait"></span>Not connected — connects when needed{{end}}</p>
+{{if .S.LastDropReason}}<p class="muted">{{.S.LastDropReason}}</p>{{end}}
+{{if and .S.LastError (not .S.Connected)}}<p class="muted bad" title="{{.S.LastError}}">{{.S.LastError}}</p>
+<p class="muted">Turn the camera on and enable Wi-Fi + PC Remote, then press Connect.</p>{{end}}
 <dl><dt>Address</dt><dd>{{.S.Host}}</dd>
 {{if .S.Model}}<dt>Model</dt><dd>{{.S.Model}}</dd>{{end}}
 {{if .S.Serial}}<dt>Serial</dt><dd>{{.S.Serial}}</dd>{{end}}
 {{if .S.Connected}}<dt>Connected since</dt><dd>{{.S.Since.Format "15:04:05"}} ({{since .S.Since}})</dd>{{end}}
 {{if .S.Drops}}<dt>Dropped sessions</dt><dd>{{.S.Drops}}</dd><dt>Last drop</dt><dd>{{ago .S.LastDropAt}}</dd>{{end}}
 <dt>Restarts</dt><dd>{{.Restarts}}</dd></dl>
-{{if .S.LastDropReason}}<p class="muted">{{.S.LastDropReason}}</p>{{end}}
-{{if and .S.LastError (not .S.Connected)}}<p class="muted bad" title="{{.S.LastError}}">{{.S.LastError}}</p>{{end}}
-{{if and .S.LastError (not .S.Connected)}}<p class="hint"><svg class="ico"><use href="#i-alert"/></svg><span>Turn the camera on and enable Wi-Fi + PC Remote, then press Connect.</span></p>{{end}}
-<div class="actions">{{if .S.Connected}}<form method="post" action="/camera/disconnect"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary"><svg class="ico"><use href="#i-x"/></svg>Disconnect</button></form>
+<div class="actions card-foot">{{if .S.Connected}}<form method="post" action="/camera/disconnect"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary"><svg class="ico"><use href="#i-x"/></svg>Disconnect</button></form>
 {{else if not (or .S.Connecting .S.Reconnecting)}}<form method="post" action="/camera/connect"><input type="hidden" name="csrf" value="{{.CSRF}}"><button><svg class="ico"><use href="#i-plug"/></svg>Connect</button></form>{{end}}</div>
-<p class="hint"><svg class="ico"><use href="#i-alert"/></svg><span>The camera accepts only one remote connection. Do not use the Sony app (Creators' App / Imaging Edge) at the same time — it blocks alpha2web or drops its session.</span></p></section>
+<details class="note"><summary>Only one connection at a time</summary><p class="muted">The camera accepts only one remote connection. Do not use the Sony app (Creators' App / Imaging Edge) at the same time — it blocks alpha2web or drops its session.</p></details></section>
 {{range .Plugins}}{{if or .Headline .Rows}}<section class="card"><h2>{{.Title}}</h2>
 {{if .Headline}}<p class="big">{{if .Level}}<span class="dot {{cls .Level}}"></span>{{end}}{{.Headline}}</p>{{end}}
-<dl>{{range .Rows}}<dt>{{.Label}}</dt><dd>{{if .Link}}<a href="{{.Link}}" target="_blank" rel="noopener">{{.Value}}</a>{{else}}{{.Value}}{{end}}</dd>{{end}}</dl></section>{{end}}
-{{if .Counts}}<section class="card"><h2>Queue</h2>
-<dl>{{range .Counts}}{{if or .N (not .Bad)}}<dt>{{.Label}}</dt><dd{{if .Bad}} class="bad"{{end}}>{{.N}}</dd>{{end}}{{end}}</dl></section>{{end}}
-{{if .Totals}}<section class="card"><h2>Since start</h2>
-<dl>{{range .Totals}}<dt>{{.Label}}</dt><dd>{{.Value}}</dd>{{end}}</dl></section>{{end}}
-{{end}}</div>
+{{if .Rows}}<dl>{{range .Rows}}<dt>{{.Label}}</dt><dd>{{if .Link}}<a href="{{.Link}}" target="_blank" rel="noopener">{{.Value}}</a>{{else}}{{.Value}}{{end}}</dd>{{end}}</dl>{{end}}</section>{{end}}{{end}}
+</div>
+{{range .Plugins}}{{if or .Counts .Totals}}<section class="card"><h2>Queue</h2>
+{{if .Counts}}<div class="kpis">{{range .Counts}}{{if or .N (not .Bad)}}<div class="kpi{{if .N}} on{{end}}{{if and .Bad .N}} bad{{end}}"><span class="n">{{.N}}</span><span class="l">{{.Label}}</span></div>{{end}}{{end}}</div>{{end}}
+{{if .Totals}}<h2 class="sub">Since start</h2><div class="kpis small">{{range .Totals}}<div class="kpi"><span class="n">{{.Value}}</span><span class="l">{{.Label}}</span></div>{{end}}</div>{{end}}</section>{{end}}{{end}}
 {{range .Plugins}}{{if .Problems}}<section class="card"><h2>Problems</h2><div class="scroll"><table><thead><tr><th>File</th><th>Status</th><th>Tries</th><th>Last error</th><th>When</th></tr></thead><tbody>
 {{range .Problems}}<tr><td title="{{.Path}}">{{if .Name}}{{.Name}}{{else}}{{base .Path}}{{end}}</td><td>{{template "badge" .Status}}</td><td>{{.Attempts}}</td><td class="err">{{short .Note}}</td><td>{{ago .Updated}}</td></tr>{{end}}
 </tbody></table></div></section>{{end}}
