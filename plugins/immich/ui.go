@@ -96,6 +96,13 @@ func (p *Plugin) Status(ctx context.Context) plugin.Status {
 	pl.mu.Lock()
 	lastSync, lastResult := pl.lastSync, pl.lastResult
 	pl.mu.Unlock()
+	if configured {
+		auto := "off"
+		if s.Auto {
+			auto = "every " + s.AutoEvery.String() + " and on every camera connect"
+		}
+		st.Rows = append(st.Rows, plugin.Row{Label: "Automatic sync", Value: auto})
+	}
 	if pl.syncing.Load() {
 		st.Rows = append(st.Rows, plugin.Row{Label: "Sync running", Value: "yes"})
 	}

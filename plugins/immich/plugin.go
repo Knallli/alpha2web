@@ -14,7 +14,7 @@ import (
 
 func init() { plugin.Register(&Plugin{}) }
 
-// Plugin downloads new files from the camera's cards on request and uploads them to Immich.
+// Plugin downloads new files from the camera's cards (automatically or on request) and uploads them to Immich.
 type Plugin struct {
 	pipe atomic.Pointer[pipeline]
 }
@@ -37,6 +37,11 @@ func (*Plugin) Fields() []plugin.Field {
 		{Key: "stack_raw_jpeg", Label: "Stack RAW+JPEG pairs", Kind: plugin.FieldBool, Default: "true", Group: groupImmich,
 			Env: "IMMICH_STACK_RAW_JPEG", Help: "Stack RAW+JPEG pairs in Immich (JPEG shown)"},
 
+		{Key: "auto_sync", Label: "Sync new files automatically", Kind: plugin.FieldBool, Default: "true", Group: groupFiles,
+			Env:  "IMMICH_AUTO_SYNC",
+			Help: "Download every new file straight from the camera to Immich whenever the camera connects and at the interval below. Runs only while Immich is set up. Off: only the \"Sync new files from camera\" button syncs."},
+		{Key: "auto_sync_interval", Label: "Look for the camera every", Kind: plugin.FieldDuration, Default: "10m", Group: groupFiles, Env: "IMMICH_AUTO_SYNC_INTERVAL",
+			Help: "Each check opens a connection to the camera, so it cannot be used by the Sony app at that moment."},
 		{Key: "delete_local", Label: "Delete the downloaded copy after upload", Kind: plugin.FieldBool, Default: "true", Group: groupFiles,
 			Env: "DELETE_AFTER_UPLOAD", Help: "Delete the local copy after a confirmed upload"},
 		{Key: "delete_library", Label: "Delete the pulled library copy after upload", Kind: plugin.FieldBool, Default: "false", Group: groupFiles,

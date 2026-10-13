@@ -1,6 +1,6 @@
 // The pipeline moves files from the camera to Immich:
 //
-//	sync, only on request (connect, list both cards, record new files)
+//	sync, automatic or on request (connect, list both cards, record new files)
 //	  -> download (one at a time) -> verify + SHA-1 -> staging
 //	  -> upload workers (bulk-upload-check, POST /assets)
 //	  -> post-processing (album, RAW+JPEG stack, delete staged copy)
@@ -64,6 +64,7 @@ type pipeline struct {
 	// Tunables; tests shorten them.
 	statfs func(dir string) (free int64, err error)
 	idle   time.Duration // how often idle workers re-check the database
+	tick   time.Duration // how often autoLoop re-reads the settings
 
 	syncCh, uploadWake, postWake, immichWake chan struct{}
 
@@ -92,6 +93,7 @@ func newPipeline(env plugin.Env, st *store.Store, staging string) *pipeline {
 		env: env, log: env.Log, store: st, staging: staging,
 		statfs: freeBytes,
 		idle:   5 * time.Second,
+		tick:   30 * time.Second,
 
 		syncCh:     make(chan struct{}, 1),
 		uploadWake: make(chan struct{}, 1),
@@ -162,6 +164,7 @@ func (p *pipeline) run(ctx context.Context) {
 	var wg sync.WaitGroup
 	start := func(f func()) { wg.Add(1); go func() { defer wg.Done(); f() }() }
 	start(func() { p.immichLoop(ctx) })
+	start(func() { p.autoLoop(ctx) })
 	start(func() { p.downloadLoop(ctx) })
 	start(func() { p.uploadLoop(ctx) })
 	start(func() { p.postLoop(ctx) })
@@ -313,7 +316,12 @@ func (p *pipeline) reconcile(ctx context.Context, cam *ptpip.Client, s settings)
 	var discovered []store.Discovered
 	skipped := 0
 	for slot := uint32(1); slot <= 2; slot++ {
+		unlock, err := p.env.Camera.LockCard(ctx)
+		if err != nil {
+			return 0, err
+		}
 		cs, err := cam.SonyListAllContents(ctx, slot)
+		unlock()
 		if err != nil {
 			// Only "no card in this slot" may be skipped. Any other failure (a
 			// timeout, a dropped session) must not look like an empty card.
@@ -353,6 +361,33 @@ func (p *pipeline) reconcile(ctx context.Context, cam *ptpip.Client, s settings)
 }
 
 const cardUnavailableMsg = "The camera did not allow access to the memory card. Close the menu or playback on the camera and make sure the Sony app is not connected, then sync again."
+
+// autoLoop requests a sync when the camera connects for any reason and every
+// AutoEvery, while auto sync is on and Immich is set up (otherwise the files
+// would only pile up in staging).
+func (p *pipeline) autoLoop(ctx context.Context) {
+	events, stop := p.env.Camera.Subscribe()
+	defer stop()
+	var next time.Time // zero: try right after start
+	t := time.NewTicker(p.tick)
+	defer t.Stop()
+	for {
+		s := p.cfg()
+		if s.Auto && s.URL != "" && s.APIKey != "" && !time.Now().Before(next) {
+			p.StartSync()
+			next = time.Now().Add(s.AutoEvery)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case e := <-events:
+			if e.Connected != nil && *e.Connected {
+				next = time.Time{}
+			}
+		case <-t.C:
+		}
+	}
+}
 
 // downloadLoop waits for sync requests; nothing touches the camera otherwise.
 func (p *pipeline) downloadLoop(ctx context.Context) {
@@ -500,6 +535,12 @@ func (p *pipeline) downloadNext(ctx context.Context, cam *ptpip.Client, s settin
 	if !found || !p.freeSpaceOK(s) {
 		return dlNone, nil
 	}
+	// before the stall watchdog starts: waiting for the gallery is no stall
+	unlock, err := p.env.Camera.LockCard(ctx)
+	if err != nil {
+		return dlNone, nil // ctx is done
+	}
+	defer unlock()
 
 	db := context.WithoutCancel(ctx)
 	if err := p.store.StartDownload(db, f.ID); err != nil {
@@ -649,7 +690,13 @@ func (p *pipeline) deleteDone(ctx context.Context, cam *ptpip.Client) {
 		if !all {
 			continue
 		}
-		if err := cam.SonyDeleteContent(ctx, c.slot, c.id); err != nil {
+		unlock, err := p.env.Camera.LockCard(ctx)
+		if err != nil {
+			return
+		}
+		err = cam.SonyDeleteContent(ctx, c.slot, c.id)
+		unlock()
+		if err != nil {
 			p.log.Warn("delete on camera", "slot", c.slot, "content", c.id, "err", err)
 			continue
 		}

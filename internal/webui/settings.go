@@ -50,7 +50,7 @@ type pluginCard struct {
 func (h *Handler) settingsPage(w http.ResponseWriter, r *http.Request) {
 	v := h.Settings.Store.Get()
 	lock := map[string]bool{}
-	for _, f := range []string{"host", "mac", "user", "password", "fingerprint", "keepalive", "export_dir", "export_template", "export_case", "export_types", "export_conflict", "export_mtime"} {
+	for _, f := range []string{"host", "mac", "user", "password", "fingerprint", "keepalive", "idle_disconnect", "export_dir", "export_template", "export_case", "export_types", "export_conflict", "export_mtime"} {
 		lock[f] = h.Settings.Locked(f)
 	}
 	var cards []pluginCard
@@ -115,6 +115,14 @@ func (h *Handler) saveSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		v.Keepalive = ka
+	}
+	if !h.Settings.Locked("idle_disconnect") {
+		idle := strings.TrimSpace(r.FormValue("idle_disconnect"))
+		if d, err := time.ParseDuration(idle); idle != "" && (err != nil || d < 0) {
+			http.Error(w, "Disconnect when unused: not a duration like 5m (0 = never)", http.StatusBadRequest)
+			return
+		}
+		v.IdleDisconnect = idle
 	}
 	v.DebugLog = r.FormValue("debug_log") != ""
 	if msg := h.saveExport(r, &v); msg != "" {

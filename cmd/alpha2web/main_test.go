@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/knallli/alpha2web/internal/camera"
 	"log/slog"
 	"strings"
 	"sync"
@@ -93,7 +94,7 @@ func TestKeepalive(t *testing.T) {
 }
 
 func TestIdleDisconnect(t *testing.T) {
-	for in, want := range map[string]time.Duration{"": 30 * time.Second, "5s": 5 * time.Second, "junk": 30 * time.Second, "-1s": 30 * time.Second} {
+	for in, want := range map[string]time.Duration{"": camera.DefaultLinger, "0": -1, "5s": 5 * time.Second, "junk": camera.DefaultLinger, "-1s": camera.DefaultLinger} {
 		if got := idleDisconnect(in); got != want {
 			t.Errorf("%q: %v", in, got)
 		}

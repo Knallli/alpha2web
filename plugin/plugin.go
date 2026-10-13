@@ -25,6 +25,9 @@ type Camera interface {
 	// session closes after a linger time.
 	Acquire(ctx context.Context) (*ptpip.Client, func(), error)
 	Subscribe() (events <-chan camera.Event, stop func())
+	// LockCard serialises card operations (listing, transfers, deletes) with
+	// the gallery; hold it for one operation only.
+	LockCard(ctx context.Context) (unlock func(), err error)
 }
 
 // LocalFile is a camera file the gallery copied to local disk.

@@ -2,6 +2,7 @@
 package webui
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"embed"
@@ -12,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 
 	"github.com/knallli/alpha2go/ptpip"
@@ -82,6 +84,13 @@ func (h *Handler) use(r *http.Request) (*ptpip.Client, func(), error) {
 	return h.Camera.Acquire(r.Context())
 }
 
+// card waits for exclusive card access (see camera.LockCard) and returns the
+// unlock function. It never gives up: a cancelled transfer breaks the session.
+func (h *Handler) card() func() {
+	unlock, _ := h.Camera.LockCard(context.Background())
+	return unlock
+}
+
 // csrfToken is random per process; every POST form carries it.
 func (h *Handler) csrfToken() string {
 	h.csrfOnce.Do(func() { h.csrf = rand.Text() })
@@ -106,7 +115,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing or wrong CSRF token: reload the page and try again", http.StatusBadRequest)
 		return
 	}
+	if userActivity(r.URL.Path) {
+		h.Camera.Extend() // using the UI keeps an open session open; never opens one
+	}
 	h.mux().ServeHTTP(w, r)
+}
+
+// userActivity tells requests caused by someone using the UI from automatic
+// polls, so a forgotten tab does not keep the camera connected.
+func userActivity(path string) bool {
+	switch {
+	case path == "/healthz", path == "/health", path == "/metrics", path == "/api/status",
+		path == "/gallery/job", path == "/liveview/status",
+		strings.HasPrefix(path, "/static/"), strings.HasPrefix(path, "/fragment/"):
+		return false
+	}
+	return true
 }
 
 func (h *Handler) mux() *http.ServeMux {

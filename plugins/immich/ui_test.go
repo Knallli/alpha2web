@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,6 +21,13 @@ import (
 // startPlugin runs the plugin against a fake camera holding one JPEG.
 func startPlugin(t *testing.T, cfg map[string]string) *Plugin {
 	t.Helper()
+	cfg = maps.Clone(cfg)
+	if cfg == nil {
+		cfg = map[string]string{}
+	}
+	if _, ok := cfg["auto_sync"]; !ok {
+		cfg["auto_sync"] = "false" // tests sync explicitly
+	}
 	card := t.TempDir()
 	f := filepath.Join(card, "slot1/DCIM/100MSDCF/DSC00001.JPG")
 	os.MkdirAll(filepath.Dir(f), 0o755)

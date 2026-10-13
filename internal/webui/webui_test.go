@@ -247,3 +247,15 @@ func TestSettingsExport(t *testing.T) {
 		t.Fatal(b)
 	}
 }
+
+func TestUserActivity(t *testing.T) {
+	for path, want := range map[string]bool{
+		"/": true, "/gallery": true, "/gallery/pull": true, "/settings": true,
+		"/fragment/dashboard": false, "/fragment/logs": false, "/static/app.js": false,
+		"/api/status": false, "/gallery/job": false, "/liveview/status": false, "/metrics": false,
+	} {
+		if got := userActivity(path); got != want {
+			t.Errorf("%s: %v", path, got)
+		}
+	}
+}

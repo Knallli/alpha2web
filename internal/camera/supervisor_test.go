@@ -370,3 +370,28 @@ func TestDisconnect(t *testing.T) {
 		t.Fatalf("%+v", st)
 	}
 }
+
+func TestLockCard(t *testing.T) {
+	s := New(Config{}, backoff.Default, slog.Default())
+	unlock, err := s.LockCard(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := s.LockCard(ctx); err == nil {
+		t.Fatal("second card operation got the lock while the first runs")
+	}
+	unlock()
+	unlock() // a second call must not free a lock someone else holds
+	u2, err := s.LockCard(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel2()
+	if _, err := s.LockCard(ctx2); err == nil {
+		t.Fatal("double unlock freed the lock")
+	}
+	u2()
+}
