@@ -140,7 +140,7 @@ func (h *harness) config() map[string]string {
 	defer h.mu.Unlock()
 	out := map[string]string{
 		"url": h.srv.URL, "api_key": h.srv.APIKey,
-		"retry_base_delay": "20ms", "retry_max_delay": "100ms", "min_free_space_mb": "0",
+		"retry_base_delay": "20ms", "retry_max_delay": "100ms", "min_free_space_mb": "0", "auto_sync": "false",
 	}
 	for k, v := range h.cfg {
 		out[k] = v
@@ -168,6 +168,7 @@ func (h *harness) startAt(addr string, tweak ...func(*pipeline)) {
 	env := plugin.Env{Camera: h.sup, Log: log, DataDir: h.data, Config: h.config}
 	h.p = newPipeline(env, st, h.staging)
 	h.p.idle = 20 * time.Millisecond
+	h.p.tick = 20 * time.Millisecond
 	for _, f := range tweak {
 		f(h.p)
 	}
@@ -705,6 +706,28 @@ func (h *harness) lastResult() string {
 	h.p.mu.Lock()
 	defer h.p.mu.Unlock()
 	return h.p.lastResult
+}
+
+func TestAutoSync(t *testing.T) {
+	cam := startCamera(t, ptpiptest.Options{Dir: sampleCard(t)})
+	h := newHarness(t, nil, "", "")
+	h.set("auto_sync", "true")
+	h.set("auto_sync_interval", "200ms")
+	h.start(cam)
+	defer h.stop()
+	h.waitCounts(map[store.Status]int{store.StatusDone: 4}) // first run right after start
+	h.waitSyncEnd()
+	n := cam.Ops.Load()
+	waitFor(t, "the next timed sync", func() bool { return cam.Ops.Load() > n })
+
+	h.set("url", "")                   // without Immich nothing is pulled automatically
+	time.Sleep(100 * time.Millisecond) // a tick that read the old settings may still start one
+	h.waitSyncEnd()
+	n = cam.Ops.Load()
+	time.Sleep(500 * time.Millisecond)
+	if m := cam.Ops.Load(); m != n {
+		t.Errorf("camera asked without Immich: %d -> %d operations", n, m)
+	}
 }
 
 func TestNoCameraAccessWithoutSync(t *testing.T) {

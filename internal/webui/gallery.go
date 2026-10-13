@@ -123,7 +123,7 @@ func (h *Handler) saveLocked() {
 // sessionList lists a slot once per camera session (a new client is a new
 // session: content IDs change). Errors are cached too, so a refusing camera is
 // asked once, not once per image.
-func (g *gallery) sessionList(c *ptpip.Client, slot uint32) ([]ptpip.SonyContent, error) {
+func (g *gallery) sessionList(c *ptpip.Client, slot uint32, card func() func()) ([]ptpip.SonyContent, error) {
 	g.lmu.Lock()
 	defer g.lmu.Unlock()
 	if g.lc != c {
@@ -133,7 +133,9 @@ func (g *gallery) sessionList(c *ptpip.Client, slot uint32) ([]ptpip.SonyContent
 		return l.items, l.err
 	}
 	// a cancelled transaction would break the camera session
+	unlock := card()
 	items, err := c.SonyListAllContents(context.Background(), slot)
+	unlock()
 	slices.SortFunc(items, func(a, b ptpip.SonyContent) int { return b.CreatedUTC.Compare(a.CreatedUTC) })
 	if !errors.Is(err, ptpip.ErrCardUnavailable) { // the user may close the camera menu and retry
 		g.lists[slot] = listed{items, err}
@@ -450,7 +452,7 @@ func (h *Handler) galleryPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer done()
-	live, err := g.sessionList(c, slot)
+	live, err := g.sessionList(c, slot, h.card)
 	if err != nil {
 		h.cameraFail(w, err)
 		return
@@ -461,7 +463,9 @@ func (h *Handler) galleryPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// leaving the page must not cancel a running transaction: that breaks the camera session
+	unlock := h.card()
 	data, err := fetchPreview(context.WithoutCancel(r.Context()), c, slot, ct, ct.Files[coverIdx(ct.Files)])
+	unlock()
 	if err != nil {
 		h.Log().Warn("gallery preview", "err", err)
 		h.cameraFail(w, err)
@@ -504,13 +508,16 @@ func fetchPreview(ctx context.Context, c *ptpip.Client, slot uint32, ct *ptpip.S
 }
 
 // lenientWriter swallows write errors so a transfer already running can finish.
+// A browser that stops reading (paused download) gives up after a deadline,
+// so the transfer and the card lock it holds are not stuck.
 type lenientWriter struct {
-	w    io.Writer
+	w    http.ResponseWriter
 	dead bool
 }
 
 func (l *lenientWriter) Write(p []byte) (int, error) {
 	if !l.dead {
+		http.NewResponseController(l.w).SetWriteDeadline(time.Now().Add(30 * time.Second))
 		if _, err := l.w.Write(p); err != nil {
 			l.dead = true
 		}
@@ -550,7 +557,7 @@ func (h *Handler) galleryFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer done()
-	live, err := h.galleryState().sessionList(c, slot)
+	live, err := h.galleryState().sessionList(c, slot, h.card)
 	if err != nil {
 		h.cameraFail(w, err)
 		return
@@ -573,6 +580,7 @@ func (h *Handler) galleryFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", strconv.FormatUint(f.Size, 10))
 	// A closed browser tab must not cancel the transfer (that breaks the camera
 	// session); the rest of the file is read and dropped instead.
+	defer h.card()()
 	if _, err := c.SonyDownloadContentFile(context.WithoutCancel(r.Context()), slot, ct.ID, lf.ID, f.Size, &lenientWriter{w: w}, nil); err != nil {
 		h.Log().Warn("download", "err", err)
 	}
@@ -592,12 +600,14 @@ func (h *Handler) galleryDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer done()
-	live, err := g.sessionList(c, slot)
+	live, err := g.sessionList(c, slot, h.card)
 	if err == nil {
 		if ct := findContent(live, slot, it.Key); ct == nil {
 			err = errors.New("The shot is no longer on the card.")
 		} else {
+			unlock := h.card()
 			err = c.SonyDeleteContent(context.WithoutCancel(r.Context()), slot, ct.ID)
+			unlock()
 		}
 		g.forget(slot)
 	}

@@ -3,14 +3,14 @@
 Web UI for managing a Sony Alpha camera remotely, built on [alpha2go](https://github.com/Knallli/alpha2go).
 Tested on the a6700 only.
 
-- Dashboard with connection status, logs. The camera connects on demand (Connect button or any action that needs it) and disconnects after `CAMERA_IDLE_DISCONNECT` (default 30 s) without use
+- Dashboard with connection status, logs. The camera connects on demand (Connect button or any action that needs it) and disconnects after `CAMERA_IDLE_DISCONNECT` (default 5 min, `0` = never; also on the settings page) without use. Running syncs, pulls and live view keep it open, and so does using the web UI (page views and clicks, not the automatic refresh of an open tab)
 - Live view (MJPEG)
 - Control: shutter (with/without autofocus), movie start/stop and a settings page for every camera property (see below)
 - Gallery: offline catalog of both cards with thumbnails; originals are pulled to `LIBRARY_DIR` (see below)
 - Files: tracked files of the plugins
 - Settings page; environment variables override and lock the fields
 - Plugins (compiled in, see `plugin/`), each can add dashboard blocks, a file table, actions, metrics and settings
-- Immich exporter (`plugins/immich`): on "Sync new files from camera" connects, downloads every new file on both cards, disconnects and uploads it to Immich with retries, adds it to an album, stacks RAW+JPEG pairs, optionally deletes the local copy and the shot on the card. Dashboard shows queue, progress, problems and recent uploads; nothing is synced automatically; files pulled in the gallery are uploaded too; actions "Sync new files from camera" and "Retry waiting files now"; `alpha2web_immich_*` metrics.
+- Immich exporter (`plugins/immich`), the main job: pulls every new file of both cards straight to Immich (camera → staging → Immich, no library copy) automatically whenever the camera connects and every `IMMICH_AUTO_SYNC_INTERVAL` (default 10 min), while Immich is set up. Toggle with `IMMICH_AUTO_SYNC` (default on); "Sync new files from camera" starts a run by hand. Uploads retry, go into an album, RAW+JPEG pairs are stacked, optionally the local copy and the shot on the card are deleted. Dashboard shows queue, progress, problems and recent uploads; files pulled in the gallery are uploaded too; action "Retry waiting files now"; `alpha2web_immich_*` metrics.
 
 ## Control
 
@@ -41,7 +41,7 @@ Camera setup (Wi-Fi, PC Remote, Access Authentication): see [alpha2go](https://g
 
 ### Immich as the only copy
 
-Everything new is imported automatically. The gallery is for picking shots: pulled originals are handed to Immich too. Set `DELETE_LIBRARY_AFTER_UPLOAD=true` to drop the library copy once Immich confirmed it, or press **Remove local copies stored in Immich** in the gallery to clean up everything that is already there (also files pulled earlier). The gallery then shows those files straight from Immich ("in Immich" badge) and does not copy them from the camera again. Deleting from the card is a separate option (`IMMICH_DELETE_ON_CAMERA`).
+Everything new is imported automatically (automatic sync, see above). The gallery is for picking shots: pulled originals are handed to Immich too. Set `DELETE_LIBRARY_AFTER_UPLOAD=true` to drop the library copy once Immich confirmed it, or press **Remove local copies stored in Immich** in the gallery to clean up everything that is already there (also files pulled earlier). The gallery then shows those files straight from Immich ("in Immich" badge) and does not copy them from the camera again. Deleting from the card is a separate option (`IMMICH_DELETE_ON_CAMERA`).
 
 ## Run without Docker
 
@@ -57,7 +57,7 @@ CAMERA_HOST=192.168.1.50 go run ./cmd/alpha2web
 | `CAMERA_WAKE_ON_LAN` | `true` sends Wake-on-LAN packets every 30 s while a connection is wanted and not yet up (needs a MAC) |
 | `CAMERA_WAKE_ON_LAN_ADDR` | target of those packets, default `255.255.255.255:9` |
 | `CAMERA_KEEPALIVE` | interval of the idle property poll that keeps the session busy and the camera properties fresh, default `10s`; `0` sends no property requests of its own after connecting (the property list is then read on demand). Also on the settings page (Diagnostics), together with "log every camera operation" (`LOG_LEVEL=debug`) |
-| `CAMERA_IDLE_DISCONNECT` | how long an unused camera session stays open before it is closed, default `30s`; the session opens again on the next button press or action |
+| `CAMERA_IDLE_DISCONNECT` | how long an unused camera session stays open before it is closed, default `5m`; `0` keeps it open until Disconnect. The session opens again on the next button press or action. Also on the settings page |
 | `CAMERA_RECONNECT_INTERVAL` | first delay between connection attempts, default `5s` (backs off to 1 minute) |
 | `SHUTDOWN_TIMEOUT` | grace period for open requests on SIGTERM, default `20s` |
 | `LOG_LEVEL` | `debug`, `info` (default), `warn`, `error` |
@@ -66,6 +66,7 @@ CAMERA_HOST=192.168.1.50 go run ./cmd/alpha2web
 | `DATA_DIR` | settings and plugin state, default `data` |
 | `LIBRARY_DIR`, `EXPORT_PATH_TEMPLATE`, `EXPORT_CASE`, `EXPORT_TYPES`, `EXPORT_CONFLICT`, `EXPORT_SET_MTIME` | gallery export folder and naming, see "Export settings" (`LIBRARY_DIR` is `/library` in docker-compose.yml) |
 | `IMMICH_URL`, `IMMICH_API_KEY`, `IMMICH_ALBUM` | Immich server, API key (needs `asset.upload`, `asset.view`, `asset.download`, `album.*`, `stack.create`) and optional album |
+| `IMMICH_AUTO_SYNC`, `IMMICH_AUTO_SYNC_INTERVAL` | pull new files to Immich on every camera connect and at this interval (default `true`, `10m`); only while Immich is set up |
 | `IMMICH_STACK_RAW_JPEG`, `DELETE_AFTER_UPLOAD`, `DELETE_LIBRARY_AFTER_UPLOAD`, `IMMICH_DELETE_ON_CAMERA` | stack pairs (default `true`), delete the staged copy (default `true`), delete the gallery-pulled library copy once it is in Immich (default `false`), delete from the card (default `false`) |
 | `SKIP_EXTENSIONS`, `UPLOAD_CONCURRENCY`, `DOWNLOAD_STALL_TIMEOUT`, `MIN_FREE_SPACE_MB`, `RETRY_BASE_DELAY`, `RETRY_MAX_DELAY` | Immich transfer tuning, see [.env.example](.env.example) |
 | `STAGING_DIR` | where downloads wait for the upload, default `<DATA_DIR>/staging` |
@@ -99,7 +100,7 @@ Template tokens: `{camera}` (model), `{serial}`, `{slot}`, `{year}` `{month}` `{
 ## Limits
 
 - Auto-discovery only searches the local layer-2 network (ARP, SSDP, port scan of the /24). Across routers set the address. With Access Authentication on it scans for the camera's SSH port.
-- The camera does not announce new shots to the host and alpha2web does not poll: new shots appear after "Load / Refresh from camera" (gallery) or "Sync new files from camera" (Immich).
+- The camera does not announce new shots to the host. The automatic Immich sync tries to reach it every `IMMICH_AUTO_SYNC_INTERVAL` (each try is a connection, so the Sony app cannot be connected at that moment; turn it off with `IMMICH_AUTO_SYNC=false`). The gallery catalog only updates on "Load / Refresh from camera".
 - The camera accepts only one remote connection. Do not use the Sony app (Creators' App / Imaging Edge) at the same time: it blocks alpha2web or drops its session.
 - Only one live-view stream at a time.
 - HEIF thumbnails and previews are converted to JPEG in pure Go (cached); if that fails the original is served and the browser may not show it.

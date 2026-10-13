@@ -104,7 +104,7 @@ func (h *Handler) refresh(c *ptpip.Client) {
 	for slot := uint32(1); slot <= 2 && !g.stop.Load(); slot++ {
 		g.update(func(j *job) { j.Current = fmt.Sprintf("Listing slot %d", slot) })
 		g.forget(slot)
-		items, err := g.sessionList(c, slot)
+		items, err := g.sessionList(c, slot, h.card)
 		g.mu.Lock()
 		s := &g.cat.Slots[slot-1]
 		switch {
@@ -150,7 +150,9 @@ func (h *Handler) refresh(c *ptpip.Client) {
 		}
 		g.update(func(j *job) { j.Current = baseName(t.it.Files[t.it.Cover].Path) })
 		var buf bytes.Buffer
+		unlock := h.card()
 		_, err := c.SonyGetContentsCompressed(context.Background(), t.slot, t.id, t.fid, ptpip.SonyThumbnail, &buf)
+		unlock()
 		if err == nil && buf.Len() == 0 {
 			err = errors.New("the camera sent no thumbnail")
 		}
@@ -246,7 +248,7 @@ func (h *Handler) pull(c *ptpip.Client, release func(), cfg export.Config, slot 
 		})
 	}
 	g.forget(slot) // the card may have changed since the last listing
-	live, err := g.sessionList(c, slot)
+	live, err := g.sessionList(c, slot, h.card)
 	if err != nil {
 		fail(err)
 		return
@@ -309,7 +311,10 @@ loop:
 				}
 				var have bool
 				if target, have = cfg.Target(rel, int64(f.Size), statFor(taken, ct.CreatedUTC)); !have {
-					if err := download(c, slot, ct.ID, lfs[i], target); err != nil {
+					unlock := h.card()
+					err := download(c, slot, ct.ID, lfs[i], target)
+					unlock()
+					if err != nil {
 						h.Log().Warn("gallery pull", "err", err)
 						fail(err)
 						break loop

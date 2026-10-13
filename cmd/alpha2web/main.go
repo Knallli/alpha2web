@@ -37,7 +37,7 @@ func env(k, def string) string {
 // envFor maps a settings field to the variable that overrides it.
 var envFor = map[string]string{
 	"host": "CAMERA_HOST", "mac": "CAMERA_MAC", "user": "CAMERA_USER", "password": "CAMERA_PASSWORD", "fingerprint": "CAMERA_FINGERPRINT",
-	"keepalive":  "CAMERA_KEEPALIVE",
+	"keepalive": "CAMERA_KEEPALIVE", "idle_disconnect": "CAMERA_IDLE_DISCONNECT",
 	"export_dir": "LIBRARY_DIR", "export_template": "EXPORT_PATH_TEMPLATE", "export_case": "EXPORT_CASE", "export_types": "EXPORT_TYPES",
 	"export_conflict": "EXPORT_CONFLICT", "export_mtime": "EXPORT_SET_MTIME",
 }
@@ -54,7 +54,7 @@ func locked(field string) bool { return os.Getenv(envFor[field]) != "" }
 // effective merges the saved settings with the environment (environment wins).
 func effective(v settings.Values, dataDir string) camera.Config {
 	pick := func(field, saved string) string { return env(envFor[field], saved) }
-	cfg := camera.Config{Host: pick("host", v.CameraHost), MAC: pick("mac", v.CameraMAC), DataDir: dataDir, Keepalive: keepalive(env("CAMERA_KEEPALIVE", v.Keepalive)), Linger: idleDisconnect(os.Getenv("CAMERA_IDLE_DISCONNECT"))}
+	cfg := camera.Config{Host: pick("host", v.CameraHost), MAC: pick("mac", v.CameraMAC), DataDir: dataDir, Keepalive: keepalive(env("CAMERA_KEEPALIVE", v.Keepalive)), Linger: idleDisconnect(pick("idle_disconnect", v.IdleDisconnect))}
 	if user := pick("user", v.CameraUser); user != "" {
 		cfg.SSH = &ptpip.SSHConfig{User: user, Password: pick("password", v.CameraPassword), Fingerprint: pick("fingerprint", v.CameraFingerprint)}
 	}
@@ -74,9 +74,13 @@ func keepalive(v string) time.Duration {
 }
 
 // idleDisconnect parses CAMERA_IDLE_DISCONNECT: how long an unused session
-// stays open, default 30s.
+// stays open, default camera.DefaultLinger; "0" keeps it open (negative for
+// the supervisor).
 func idleDisconnect(v string) time.Duration {
-	if d, err := time.ParseDuration(v); err == nil && d > 0 {
+	if d, err := time.ParseDuration(v); err == nil && d >= 0 {
+		if d == 0 {
+			return -1
+		}
 		return d
 	}
 	return camera.DefaultLinger

@@ -14,9 +14,11 @@ import (
 type settings struct {
 	URL, APIKey, Album string
 	Stack              bool
-	DeleteLocal        bool // remove the staged copy once the asset is safe in Immich
-	DeleteLibrary      bool // also remove the gallery-pulled library copy once the asset is safe in Immich
-	DeleteOnCamera     bool // remove a content from the card once all its files are done
+	Auto               bool          // sync on every camera connect and every AutoEvery
+	AutoEvery          time.Duration // how often to try to reach the camera for an automatic sync
+	DeleteLocal        bool          // remove the staged copy once the asset is safe in Immich
+	DeleteLibrary      bool          // also remove the gallery-pulled library copy once the asset is safe in Immich
+	DeleteOnCamera     bool          // remove a content from the card once all its files are done
 	Skip               []string
 	Concurrency        int
 	Stall              time.Duration
@@ -29,7 +31,7 @@ type settings struct {
 func parseSettings(cfg map[string]string) (settings, error) {
 	s := settings{
 		URL: strings.TrimSpace(cfg["url"]), APIKey: strings.TrimSpace(cfg["api_key"]), Album: strings.TrimSpace(cfg["album"]),
-		Stack: true, DeleteLocal: true, Concurrency: 2,
+		Stack: true, DeleteLocal: true, Concurrency: 2, Auto: true, AutoEvery: 10 * time.Minute,
 		Stall: 3 * time.Minute, MinFreeBytes: 1024 << 20,
 		Retry: backoff.Policy{Base: 5 * time.Second, Max: 15 * time.Minute, Jitter: 0.2},
 	}
@@ -76,6 +78,8 @@ func parseSettings(cfg map[string]string) (settings, error) {
 		}
 	}
 	boolean("stack_raw_jpeg", &s.Stack)
+	boolean("auto_sync", &s.Auto)
+	dur("auto_sync_interval", &s.AutoEvery)
 	boolean("delete_local", &s.DeleteLocal)
 	boolean("delete_library", &s.DeleteLibrary)
 	boolean("delete_on_camera", &s.DeleteOnCamera)

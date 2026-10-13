@@ -20,6 +20,9 @@ type Values struct {
 	// Keepalive is the idle property poll interval: empty = 10s, "0" = no
 	// property requests of our own.
 	Keepalive string `json:"keepalive,omitempty"`
+	// IdleDisconnect is how long an unused session stays open: empty =
+	// default, "0" = until Disconnect.
+	IdleDisconnect string `json:"idle_disconnect,omitempty"`
 	// DebugLog logs every camera operation with its duration.
 	DebugLog bool `json:"debug_log,omitempty"`
 	// Gallery export; empty = default (see internal/export).

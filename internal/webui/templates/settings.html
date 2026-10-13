@@ -9,7 +9,9 @@
 <div class="field"><label for="password">Password{{if .HasPass}} (set){{end}}</label><input id="password" name="password" type="password" autocomplete="new-password" placeholder="{{if .HasPass}}leave empty to keep{{end}}"{{if .Lock.password}} disabled{{end}}>
 {{if .HasPass}}<label class="check"><input type="checkbox" name="clear_password" value="1"> Remove the stored password</label>{{end}}</div>
 <div class="field"><label for="fingerprint">SSH fingerprint</label><input id="fingerprint" name="fingerprint" value="{{.V.CameraFingerprint}}" placeholder="SHA256:…"{{if .Lock.fingerprint}} disabled{{end}}>
-<p class="muted">Shown on the camera under MENU → Network → Network Option → Access Authen. Info. The password is only sent to a camera with this fingerprint.</p></div></section>
+<p class="muted">Shown on the camera under MENU → Network → Network Option → Access Authen. Info. The password is only sent to a camera with this fingerprint.</p></div>
+<div class="field"><label for="idle_disconnect">Disconnect when unused for</label><input id="idle_disconnect" name="idle_disconnect" value="{{.V.IdleDisconnect}}" placeholder="5m"{{if .Lock.idle_disconnect}} disabled{{end}}>
+<p class="muted">After the last use or the Connect button. 0 = stay connected until Disconnect (reconnects after drops; the Sony app cannot connect meanwhile). <code>CAMERA_IDLE_DISCONNECT</code></p></div></section>
 <section class="card"><h2>Diagnostics</h2>
 <div class="field"><label for="keepalive">Property poll interval</label><input id="keepalive" name="keepalive" value="{{.V.Keepalive}}" placeholder="10s"{{if .Lock.keepalive}} disabled{{end}}>
 <p class="muted">How often the idle session asks the camera for changed properties. 0 = no requests of our own after connecting (use this to test whether they upset the camera).</p></div>

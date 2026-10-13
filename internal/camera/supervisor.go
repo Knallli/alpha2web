@@ -29,7 +29,10 @@ import (
 var ErrNotConnected = errors.New("camera not connected")
 
 // DefaultLinger is how long an unused session stays open.
-const DefaultLinger = 30 * time.Second
+const DefaultLinger = 5 * time.Minute
+
+// never stands in for "no idle disconnect" (Linger < 0).
+const never = 100 * 365 * 24 * time.Hour
 
 // ConnectTimeout is how long Acquire waits for a session.
 const ConnectTimeout = 60 * time.Second
@@ -55,7 +58,7 @@ type Config struct {
 	// once after connecting; negative leaves the camera completely alone.
 	Keepalive time.Duration
 
-	// Linger is how long an unused session stays open; 0 = DefaultLinger.
+	// Linger is how long an unused session stays open; 0 = DefaultLinger, < 0 = until Disconnect.
 	Linger time.Duration
 
 	// Discovery tunes the network scan (tests; zero values are fine).
@@ -97,6 +100,7 @@ type Supervisor struct {
 	tried   chan struct{}      // closed (and replaced) when an attempt ends without a session
 	tryErr  error              // error of that attempt
 	stop    error              // why cancel was called (errSettings, errDisconnect)
+	card    chan struct{}      // held during one card operation, see LockCard
 
 	users     int       // active leases
 	lastUsed  time.Time // last release
@@ -165,7 +169,7 @@ func (s *Supervisor) publish(e Event) {
 
 func New(cfg Config, restart backoff.Policy, log *slog.Logger) *Supervisor {
 	return &Supervisor{cfg: cfg, restart: restart, log: log, st: Status{Host: cfg.Host},
-		wake: make(chan struct{}, 1), cfgWake: make(chan struct{}, 1), tried: make(chan struct{})}
+		wake: make(chan struct{}, 1), cfgWake: make(chan struct{}, 1), tried: make(chan struct{}), card: make(chan struct{}, 1)}
 }
 
 // open connects to one address and opens the session.
@@ -273,7 +277,12 @@ func poke(ch chan struct{}) {
 	}
 }
 
-func (s *Supervisor) lingerLocked() time.Duration { return cmp.Or(s.cfg.Linger, DefaultLinger) }
+func (s *Supervisor) lingerLocked() time.Duration {
+	if s.cfg.Linger < 0 {
+		return never
+	}
+	return cmp.Or(s.cfg.Linger, DefaultLinger)
+}
 
 // wantedLocked says whether anything needs the camera: a lease or a pressed Connect.
 func (s *Supervisor) wantedLocked() bool { return s.users > 0 || time.Now().Before(s.holdUntil) }
@@ -368,6 +377,19 @@ func (s *Supervisor) Acquire(ctx context.Context) (*ptpip.Client, func(), error)
 		s.users--
 		s.mu.Unlock()
 		return nil, nil, err
+	}
+}
+
+// LockCard waits until no other card operation (listing, thumbnail, file
+// transfer, delete) runs and returns the unlock function: the camera answers
+// DeviceBusy to overlapping ones, e.g. a gallery pull during a sync.
+func (s *Supervisor) LockCard(ctx context.Context) (func(), error) {
+	select {
+	case s.card <- struct{}{}:
+		var once sync.Once
+		return func() { once.Do(func() { <-s.card }) }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
 }
 
